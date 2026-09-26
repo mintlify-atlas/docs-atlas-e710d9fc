@@ -1,0 +1,169 @@
+---
+title: "State and storage in TaskMaster"
+sidebarTitle: "State & Storage"
+description: "TaskMaster stores all state in ~/.taskmaster — a SQLite database, a JSON config, and a secrets directory. Nothing ever enters the project repository."
+---
+
+TaskMaster keeps all persistent state in a single directory on your machine — `~/.taskmaster` by default. No state is written into the project repository, and no credentials ever appear in `config.json` or in version control. The directory is created with restrictive permissions when `taskmaster` first runs, and every sensitive file inside it is locked to owner-read-only.
+
+## Directory layout
+
+```
+~/.taskmaster/          (mode 0700)
+├── config.json         (mode 0600)
+├── state.sqlite        (mode 0600)
+└── secrets/            (mode 0700)
+    └── <key-name>      (mode 0600)
+```
+
+The root directory, `secrets/` subdirectory, `config.json`, and `state.sqlite` are all created by `ensureHome` and `openDatabase` in `src/paths.ts` and `src/db.ts`. File-mode enforcement happens at creation time and is re-applied on every open.
+
+### Overriding the home directory
+
+Set the `TASKMASTER_HOME` environment variable to use a different path:
+
+```bash
+TASKMASTER_HOME=/tmp/my-taskmaster taskmaster demo
+```
+
+The `taskmasterHome` function in `src/paths.ts` checks this variable before falling back to `~/.taskmaster`:
+
+```typescript
+export function taskmasterHome(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.TASKMASTER_HOME?.trim();
+  if (override) return path.resolve(override);
+  return path.join(os.homedir(), ".taskmaster");
+}
+```
+
+## config.json
+
+`config.json` stores enabled runtimes and per-agent model assignments. It is written and read by `src/config.ts`. The structure is:
+
+```typescript
+export interface TaskMasterConfig {
+  version: 1;
+  enabledRuntimes: string[];
+  agents: {
+    builder?: AgentAssignment;
+    planner?: AgentAssignment;
+  };
+}
+
+export interface AgentAssignment {
+  runtime: string;
+  model: string;
+}
+```
+
+A minimal default configuration looks like this:
+
+```json
+{
+  "version": 1,
+  "enabledRuntimes": ["opencode"],
+  "agents": {
+    "builder": {
+      "runtime": "opencode",
+      "model": "opencode/nemotron-3.5-lightning-free"
+    },
+    "planner": {
+      "runtime": "opencode",
+      "model": "opencode/nemotron-3.5-lightning-free"
+    }
+  }
+}
+```
+
+`config.json` is **not** a secrets store. API keys and other credentials belong in `secrets/`, referenced only by name from other configuration.
+
+## Secrets model
+
+Credentials are stored as individual files under `~/.taskmaster/secrets/`. The directory mode is `0700` and each secret file is mode `0600`. Callers access credentials through `SecretStore` — the project code never reads a key file directly. Configuration refers to a secret by its name (`apiKeyRef`), not its value.
+
+This indirection means the key material never appears in:
+- `config.json`
+- The project's git repository
+- Any event payload in `state.sqlite`
+
+A future backend can replace the file-based `FileSecretStore` with the macOS Keychain or another credential manager without changing any call sites.
+
+## SQLite database
+
+`state.sqlite` is the authoritative source for all runtime state. It is opened with three PRAGMAs applied immediately:
+
+```typescript
+db.exec("PRAGMA journal_mode = WAL;");
+db.exec("PRAGMA foreign_keys = ON;");
+db.exec("PRAGMA busy_timeout = 5000;");
+```
+
+- **WAL mode** allows readers and a single writer to operate concurrently without blocking each other.
+- **Foreign keys ON** enforces referential integrity across all tables.
+- **`busy_timeout = 5000`** makes write contention retry for up to five seconds before returning `SQLITE_BUSY`, preventing spurious failures when multiple processes share the database.
+
+<Note>
+  The current schema version is **3**, tracked in the `schema_meta` table. `openDatabase` compares the stored version to `SCHEMA_VERSION` on every open and updates the row if the schema has been migrated forward.
+</Note>
+
+### Tables
+
+| Table              | Purpose                                                                                     |
+|--------------------|---------------------------------------------------------------------------------------------|
+| `schema_meta`      | Single-row version counter used for schema migration checks                                 |
+| `projects`         | One row per project; keyed by `root_path` (the git toplevel)                                |
+| `agents`           | Registry of the five fixed roles; seeded on every `openDatabase` call                       |
+| `tasks`            | All task rows with status, ownership, dependencies, branch, and result                      |
+| `runs`             | One row per agent invocation: runtime, model, status, start/finish times, exit code         |
+| `sessions`         | Persisted runtime session params (e.g. OpenCode session IDs) keyed by agent and task        |
+| `events`           | Append-only event log; the communication channel between agents                             |
+| `providers`        | Registered AI provider configurations (kind, label, base URL, `apiKeyRef`, default model)  |
+| `demo_sessions`    | Tracks the active tmux session for a project: session name, status, log pane ID            |
+| `agent_executions` | One row per (project, agent) pair; stores lifecycle, pane identity, PID, and restart count  |
+
+### Project identity
+
+The primary key for a project is its git toplevel path, stored in `projects.root_path` as a `UNIQUE` column. `taskmaster doctor` records the project on first use. Human-readable Markdown memory (`.taskmaster/memory/*.md`) lives inside the project repository and arrives with the documenter; it is not part of the Phase 1 state model.
+
+### Events table
+
+The `events` table is append-only. Each row captures a moment in time:
+
+```sql
+CREATE TABLE IF NOT EXISTS events (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT REFERENCES projects(id),
+  agent_id    TEXT,
+  task_id     TEXT,
+  type        TEXT NOT NULL,
+  summary     TEXT NOT NULL,
+  payload_json TEXT,
+  created_at  TEXT NOT NULL
+);
+```
+
+`payload_json` is an optional JSON blob carrying structured detail (pane IDs, exit codes, PID values, etc.). The `listEvents` function in `src/events.ts` can filter by `project_id` and `task_id` and is the source for the live event-log pane in the tmux `support` window.
+
+### `agent_executions` table
+
+```sql
+CREATE TABLE IF NOT EXISTS agent_executions (
+  id           TEXT PRIMARY KEY,
+  project_id   TEXT NOT NULL REFERENCES projects(id),
+  agent_id     TEXT NOT NULL REFERENCES agents(id),
+  lifecycle    TEXT NOT NULL,
+  tmux_session TEXT,
+  tmux_window  TEXT,
+  tmux_pane_id TEXT,
+  command      TEXT,
+  pid          INTEGER,
+  started_at   TEXT,
+  exited_at    TEXT,
+  exit_code    INTEGER,
+  restart_count INTEGER NOT NULL DEFAULT 0,
+  updated_at   TEXT NOT NULL,
+  UNIQUE(project_id, agent_id)
+);
+```
+
+There is at most one execution row per (project, agent) pair. `restart_count` increments on every `taskmaster demo restart <role>` call. `lifecycle` values are defined in `src/lifecycle.ts` and described in [Agents & Roles](/concepts/agents-and-roles).

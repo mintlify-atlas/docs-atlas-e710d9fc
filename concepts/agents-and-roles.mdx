@@ -1,0 +1,95 @@
+---
+title: "Agents and roles in the TaskMaster team"
+sidebarTitle: "Agents & Roles"
+description: "TaskMaster's five fixed roles (planner, builder, tester, validator, documenter) each have defined responsibilities, a runtime model, and a lifecycle state."
+---
+
+TaskMaster operates with a fixed, five-member team. The roles never change, no new agents are hired, and delegation happens by creating tasks rather than spawning new processes. Each role is a registry row in the SQLite `agents` table, seeded once when the database is first opened — not a running process in its own right. The five roles come directly from the `AGENT_ROLES` constant in `src/db.ts`:
+
+```typescript
+export const AGENT_ROLES = ["planner", "builder", "tester", "validator", "documenter"] as const;
+```
+
+## Role responsibilities
+
+Every role has a clear boundary for what it writes and what it reads. Roles communicate through durable events and task-status transitions — never by rewriting each other's output directly.
+
+| Role          | Writes                                              | Reads                                     |
+|---------------|-----------------------------------------------------|-------------------------------------------|
+| **Planner**   | Architecture, decisions, context, the task DAG      | Repo, memory, events                      |
+| **Builder**   | Source code, implementation tests, events           | Assignment, memory, events                |
+| **Tester**    | Test status, failure reports                        | Implementation, memory, events            |
+| **Validator** | PASS or REWORK decision                             | Diff, tests, architecture, events         |
+| **Documenter**| Markdown memory reconciliation                      | Everything above                          |
+
+## Planner
+
+The planner is the primary delegator. Given a user goal, it produces a `ProjectPlan` JSON document (version `1`) containing a project summary, an optional architecture block, and an ordered list of `PlannedTask` objects, each with a `tempId`, `title`, `description`, assigned `agent`, `dependencies`, and `acceptanceCriteria`. The plan is written to `.taskmaster/inbox/plan.json` inside the project repository.
+
+TaskMaster reads that file, validates it against the `ProjectPlan` schema, and — only if validation passes — inserts the entire task DAG in a single transaction. Planner `tempId` values are local identifiers used to express the dependency graph; they are replaced by UUIDs when tasks are persisted. Any cycle, missing dependency reference, or empty acceptance-criteria list causes the whole plan to be rejected.
+
+The planner runs via the OpenCode runtime. The model is taken from `agents.planner.model` in `config.json` (default: `opencode/nemotron-3.5-lightning-free`). An empty or missing model string is a hard error at launch time.
+
+## Builder
+
+The builder claims and executes tasks. When a task transitions to `READY` (all its dependencies are `DONE`), the builder can atomically claim it via `claimTask` and begin work. The builder runs source code, writes implementation and tests, and publishes events as it progresses.
+
+Like the planner, the builder uses the OpenCode runtime. The model is read from `agents.builder.model` in `config.json`. Every launch passes `--model <value>` explicitly — TaskMaster never relies on OpenCode's remembered last-used model.
+
+## Tester
+
+The tester receives completed builder tasks and runs the test suite. It writes a test-status record and, on failure, a structured failure report that the validator and builder can both inspect. The tester does not modify source files.
+
+<Note>
+  The tester, validator, and documenter are currently mocked (Phases 1–4). Only the planner and builder invoke OpenCode. The mock agent simply idles in its tmux pane; it does not call any model or modify any task status.
+</Note>
+
+## Validator
+
+The validator reads the diff produced by the builder, the tester's results, and the planner's architecture notes to issue a binary decision: **PASS** or **REWORK**. A PASS advances the task to `DONE`. A REWORK decision moves the task back so the builder can address the feedback.
+
+## Documenter
+
+The documenter runs alongside the main pipeline. It reconciles human-readable Markdown memory (`.taskmaster/memory/*.md`) after validation passes, ensuring that architectural decisions and implementation notes stay in sync with completed work. Other agents publish events but do not freely rewrite the same Markdown files; the documenter is the sole owner of that surface.
+
+## Agents as registry rows
+
+The `agents` table is seeded automatically by `openDatabase` every time the database is opened:
+
+```typescript
+function seedAgents(db: DatabaseSync): void {
+  const now = new Date().toISOString();
+  const insert = db.prepare(
+    `INSERT INTO agents (id, role, runtime_id, provider_id, model, created_at, updated_at)
+     VALUES (?, ?, NULL, NULL, NULL, ?, ?)
+     ON CONFLICT(id) DO NOTHING`,
+  );
+  for (const role of AGENT_ROLES) {
+    insert.run(role, role, now, now);
+  }
+}
+```
+
+Each row stores the agent's `role`, an optional `runtime_id`, `provider_id`, and `model`. The five rows are always present. They describe configuration, not running processes.
+
+## Agent lifecycle states
+
+When `taskmaster demo` starts, each agent is given a tmux pane and its process state is tracked in the `agent_executions` table through a separate lifecycle that is independent of task status:
+
+```
+CREATED → STARTING → RUNNING → EXITED
+                   ↓
+                CRASHED
+RESTARTING → RUNNING
+```
+
+| State         | Meaning                                                                 |
+|---------------|-------------------------------------------------------------------------|
+| `CREATED`     | Row exists; no pane has been spawned yet                                |
+| `STARTING`    | `respawn-pane` has been called; tmux pane exists but PID not yet visible|
+| `RUNNING`     | `pane_dead = 0` and a PID is present                                    |
+| `EXITED`      | Pane exited cleanly (`exit_code = 0`)                                   |
+| `CRASHED`     | Pane died with a non-zero exit code, or the session disappeared         |
+| `RESTARTING`  | `taskmaster demo restart <role>` has been issued; waiting for new PID   |
+
+`taskmaster status` reads this lifecycle from SQLite after performing a live tmux liveness probe — it does not parse pane text.

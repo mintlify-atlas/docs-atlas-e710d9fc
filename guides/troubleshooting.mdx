@@ -1,0 +1,165 @@
+---
+title: "Troubleshoot common TaskMaster issues"
+sidebarTitle: "Troubleshooting"
+description: "Fix common TaskMaster errors including missing runtime, demo session not running, plan rejected, build verification failures, and tmux session problems."
+---
+
+Most TaskMaster problems fall into a small set of categories: a missing system dependency, an unauthenticated runtime, a misconfigured model, or a stale tmux session. Run `taskmaster doctor` first — it checks tmux, git, and every configured runtime in one pass and tells you exactly what is missing.
+
+<AccordionGroup>
+  <Accordion title="taskmaster doctor reports tmux missing (✗)">
+    TaskMaster requires tmux to create and manage agent panes. Install it for your platform:
+
+    **macOS (Homebrew):**
+    ```bash
+    brew install tmux
+    ```
+
+    **Ubuntu / Debian:**
+    ```bash
+    sudo apt install tmux
+    ```
+
+    After installation, run `taskmaster doctor` again to confirm tmux shows `✓`.
+  </Accordion>
+
+  <Accordion title="Runtime shows ○ (installed but not authenticated)">
+    The `○` symbol in `taskmaster doctor` means the runtime binary is present but no authentication signal was detected. TaskMaster does not guess subscription plan names or spend a model call to check — it only looks for known environment variables or credential files.
+
+    **For OpenCode**, provide at least one of the following:
+
+    ```bash
+    export OPENAI_API_KEY="sk-..."
+    export ANTHROPIC_API_KEY="sk-ant-..."
+    export OPENROUTER_API_KEY="sk-or-..."
+    ```
+
+    Or run `opencode` once interactively to complete its own authentication flow, then re-run `taskmaster doctor`.
+  </Accordion>
+
+  <Accordion title='Builder run fails: "Builder OpenCode model is not configured"'>
+    `~/.taskmaster/config.json` is either missing the `agents.builder` section or has an incorrect `runtime` value. The full error is:
+
+    > Builder OpenCode model is not configured. Set agents.builder.runtime to "opencode" and agents.builder.model.
+
+    **Fix:** ensure your config file includes both fields:
+
+    ```json
+    {
+      "version": 1,
+      "enabledRuntimes": ["opencode"],
+      "agents": {
+        "builder": {
+          "runtime": "opencode",
+          "model": "opencode/nemotron-3.5-lightning-free"
+        }
+      }
+    }
+    ```
+
+    The `runtime` field must be the string `"opencode"` and `model` must be non-empty. TaskMaster will not fall back to OpenCode's remembered model.
+  </Accordion>
+
+  <Accordion title='Builder run fails: "Builder pane is missing"'>
+    The demo session is not running, the builder pane was closed, or the tmux session was killed after the demo started.
+
+    **Fix:** start (or restart) the demo session:
+
+    ```bash
+    taskmaster demo
+    ```
+
+    If the session already exists but any pane is missing, `taskmaster demo` detects the incomplete layout, kills the old session, and recreates it from scratch.
+  </Accordion>
+
+  <Accordion title='Builder run fails verification ("did not produce a verified git change")'>
+    The builder exited with code `0` but made no detectable git changes, or a specific file named in the prompt was not created. The full error is:
+
+    > Builder run failed verification (exit 0). Model \<model\> was passed explicitly.
+
+    **Steps to diagnose:**
+
+    1. Re-attach to the session to read the builder pane output:
+       ```bash
+       taskmaster attach
+       ```
+    2. Switch to the `agents` window and read the builder pane for error messages from OpenCode.
+    3. Run `git status` in your project root to confirm no files were changed.
+
+    **Common causes:**
+    - OpenCode produced output but wrote to a path outside the git repository
+    - The prompt was ambiguous and OpenCode chose not to make changes
+    - The run timed out before OpenCode finished
+
+    Increase the timeout for complex tasks:
+
+    ```bash
+    TASKMASTER_RUN_TIMEOUT_MS=300000 taskmaster run --agent builder "<prompt>"
+    ```
+  </Accordion>
+
+  <Accordion title='Plan rejected: "Planner did not write .taskmaster/inbox/plan.json"'>
+    The planner agent exited without writing the plan file. This usually means OpenCode timed out, failed to authenticate, or encountered an error before completing.
+
+    **Steps to diagnose:**
+
+    1. Attach to the session and check the planner pane:
+       ```bash
+       taskmaster attach
+       ```
+    2. Switch to the `agents` window and read the planner pane output.
+    3. Verify OpenCode is authenticated (`taskmaster doctor`).
+    4. Re-run the plan command once authentication is confirmed:
+       ```bash
+       taskmaster plan "<goal>"
+       ```
+  </Accordion>
+
+  <Accordion title='Plan rejected: "Planner modified product files"'>
+    The planner agent edited source files in the repository instead of only writing `.taskmaster/inbox/plan.json`. TaskMaster detects this by comparing `git status --porcelain` before and after the planner run, and rejects the plan if any file outside `.taskmaster/` was changed.
+
+    This is an intentional validation guard. The planner skill (`skills/planner/SKILL.md`) explicitly instructs the planner not to edit product source files, write implementation code, or start any tasks.
+
+    **Fix:** re-run `taskmaster plan`. The plan file from the previous attempt is deleted before each new run, so there is no stale state to clean up manually.
+  </Accordion>
+
+  <Accordion title="TaskClaimError: task is owned by someone in status RUNNING">
+    A task is already claimed and in `RUNNING` status, meaning another agent attempt is still active. Task ownership in TaskMaster is atomic — a second claim attempt for the same task by a different owner is always rejected.
+
+    **Fix:** wait for the current run to finish, then check status:
+
+    ```bash
+    taskmaster status
+    ```
+
+    If the run appears stuck, attach to the session to inspect the relevant agent pane:
+
+    ```bash
+    taskmaster attach
+    ```
+  </Accordion>
+
+  <Accordion title="tmux session not found">
+    The tmux session was stopped with `taskmaster demo stop`, killed manually, or lost after a machine reboot. tmux sessions do not persist across reboots.
+
+    **Fix:** recreate the session:
+
+    ```bash
+    taskmaster demo
+    ```
+  </Accordion>
+
+  <Accordion title="taskmaster command not found after build">
+    The `taskmaster` binary is not on your `PATH`. After building from source, link the package globally:
+
+    ```bash
+    npm link
+    ```
+
+    Run this command from the TaskMaster repository root. Alternatively, invoke the CLI directly without linking:
+
+    ```bash
+    node dist/cli.js <command>
+    ```
+  </Accordion>
+</AccordionGroup>

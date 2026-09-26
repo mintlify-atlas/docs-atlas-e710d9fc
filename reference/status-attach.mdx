@@ -1,0 +1,73 @@
+---
+title: "taskmaster status and attach — session monitoring"
+sidebarTitle: "status & attach"
+description: "taskmaster status reconciles live tmux panes against SQLite and prints agent lifecycle states. taskmaster attach reconnects your terminal to the running multi-agent tmux session."
+---
+
+`taskmaster status` and `taskmaster attach` are your two primary observation tools. Use `status` to get a quick snapshot of every agent's lifecycle without opening a terminal multiplexer, and `attach` to drop back into the tmux session when you want to watch agents work in real time.
+
+## `taskmaster status`
+
+```bash
+taskmaster status
+```
+
+Probes the live tmux session, compares pane states against the SQLite execution records, updates any stale lifecycle values, and prints the reconciled result. The output is identical to `taskmaster demo status`.
+
+### Example output
+
+```
+TaskMaster — my-project
+
+planner       running
+builder       exited
+tester        crashed
+validator     running
+documenter    running
+
+tmux session:
+taskmaster-my-project
+```
+
+If the tmux session is not running, the last line reads `taskmaster-my-project (not running)` and any agents that were previously `running`, `starting`, or `restarting` are transitioned to `crashed`.
+
+### Lifecycle values
+
+| Value | Meaning |
+|-------|---------|
+| `running` | The tmux pane is alive and the process is active. |
+| `starting` | The pane was just created; the process has not yet been confirmed alive. |
+| `restarting` | A restart was requested; the pane is being respawned. |
+| `exited` | The process ended with a zero exit code or the session was stopped cleanly. |
+| `crashed` | The process ended with a non-zero exit code, or the pane disappeared unexpectedly. |
+| `missing` | No execution record exists in SQLite for this role (session has never been started). |
+
+### Exit code
+
+`taskmaster status` always exits with code `0`, regardless of individual agent states.
+
+---
+
+## `taskmaster attach`
+
+```bash
+taskmaster attach
+```
+
+Attaches your current terminal to the running tmux session `taskmaster-<project>`. Before attaching, a `TMUX_SESSION_ATTACHED` event is appended to the SQLite event log so the attachment is visible in the session history.
+
+The command requires the session to be active. If no session is running it throws an error:
+
+```
+taskmaster attach failed: tmux session taskmaster-<project> is not running
+```
+
+### Detaching
+
+To leave the session without stopping it, use your tmux prefix key (default **Ctrl-b**) followed by **d**. This detaches your terminal and returns you to the shell while all agents continue running.
+
+To return later, run `taskmaster attach` again.
+
+<Tip>
+  Run `taskmaster status` before attaching to confirm the session is alive and to see which agents are currently active. This avoids attach errors and gives you context on what to look for in the panes.
+</Tip>

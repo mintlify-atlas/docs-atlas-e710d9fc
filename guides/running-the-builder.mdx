@@ -1,0 +1,79 @@
+---
+title: "Run the builder agent with OpenCode"
+sidebarTitle: "Run the Builder"
+description: "Dispatch a single builder task via OpenCode in its tmux pane, then verify the result by checking git status and the presence of any requested file."
+---
+
+`taskmaster run --agent builder "<prompt>"` dispatches a single prompt to the builder agent running OpenCode in its tmux pane. TaskMaster creates a task record in SQLite, invokes `opencode run --model <model> <prompt>` inside the builder pane, waits for the process to exit, and then verifies the result by checking git status. If verification passes, the run is marked `DONE` and the command exits cleanly.
+
+## Prerequisites
+
+- **OpenCode** installed and authenticated (check with `taskmaster doctor`)
+- The **demo session is running** — start it with `taskmaster demo` first
+- The project directory is a **git repository** (builder verification requires `git`)
+- `agents.builder.model` is set in `~/.taskmaster/config.json` with `agents.builder.runtime` set to `"opencode"`
+
+## Command syntax
+
+```bash
+taskmaster run --agent builder "Create FILE.md containing exactly: Hello World"
+```
+
+Replace the prompt with any instruction you want the builder to execute. If the prompt names a specific file (for example `FILE.md`), TaskMaster also verifies that file exists after the run.
+
+## What happens internally
+
+1. TaskMaster loads `~/.taskmaster/config.json` and reads `agents.builder.model`.
+2. A new task is created in SQLite with status `READY` and immediately claimed for the builder agent.
+3. A run record is inserted with status `RUNNING` and the current timestamp.
+4. `opencode run --model <model> <prompt>` is sent to the builder's tmux pane via `respawn-pane`.
+5. TaskMaster waits for the pane process to exit. The default timeout is **3 minutes** (controlled by `TASKMASTER_RUN_TIMEOUT_MS`).
+6. Git status is captured before and after the run. Verification requires:
+   - Exit code `0`
+   - At least one new line in `git status --porcelain` (a real git change)
+7. If the prompt mentioned a specific filename, TaskMaster also checks that the file exists on disk.
+
+## Successful output
+
+When verification passes, the command prints:
+
+```
+Builder run <run-id>
+model opencode/nemotron-3.5-lightning-free
+tmux taskmaster-my-project
+verified FILE.md
+```
+
+If no specific file was requested, the last line reads `verified git change`.
+
+## Verification logic
+
+A run is verified when **all** of the following are true:
+
+| Condition | Required |
+| --- | --- |
+| OpenCode exits with code `0` | Always |
+| `git status --porcelain` has at least one new change | Always |
+| The file named in the prompt exists | Only when a filename was detected in the prompt |
+
+If verification fails, TaskMaster throws an error, marks the task `FAILED`, and exits with code `1`. Check the builder pane output with `taskmaster attach`.
+
+## Warnings
+
+<Warning>
+  Only `--agent builder` is supported. Passing any other role (planner, tester, validator, documenter) returns an error: _"Phase 3 runs the builder only. Planner, tester, validator, and documenter stay mocked."_
+</Warning>
+
+<Warning>
+  The builder pane must already be running inside a demo session before you call `taskmaster run`. If the pane is missing or the tmux session is not active, the command fails with _"Builder pane is missing. Start the demo session again."_ Run `taskmaster demo` first.
+</Warning>
+
+## Adjusting the timeout
+
+<Tip>
+  For complex tasks that take longer than three minutes, increase the timeout with the `TASKMASTER_RUN_TIMEOUT_MS` environment variable (value in milliseconds):
+
+  ```bash
+  TASKMASTER_RUN_TIMEOUT_MS=300000 taskmaster run --agent builder "Refactor the entire auth module"
+  ```
+</Tip>

@@ -1,0 +1,181 @@
+---
+title: "ProjectPlan JSON schema reference"
+sidebarTitle: "Plan Schema"
+description: "Complete reference for the version-1 ProjectPlan JSON structure the planner must produce and that TaskMaster validates before inserting any tasks."
+---
+
+The planner agent writes its output to `.taskmaster/inbox/plan.json` inside the project's git root. TaskMaster reads that file after the OpenCode process exits, runs it through `validatePlan`, and only inserts the task DAG into SQLite once every validation check passes. If the file is missing, malformed, or contains any error, the entire plan is rejected.
+
+## Annotated example
+
+```json
+{
+  "version": 1,
+  "projectSummary": "A brief description of the whole project",
+  "architecture": {
+    "summary": "High-level design choice",
+    "decisions": ["Use vanilla JS, no framework"]
+  },
+  "tasks": [
+    {
+      "tempId": "t1",
+      "title": "Create index.html",
+      "description": "Create the main HTML file with game board structure",
+      "agent": "builder",
+      "dependencies": [],
+      "acceptanceCriteria": ["index.html exists and has a div#board element"]
+    },
+    {
+      "tempId": "t2",
+      "title": "Add game logic",
+      "description": "Implement win detection and player turns",
+      "agent": "builder",
+      "dependencies": ["t1"],
+      "acceptanceCriteria": ["Win condition detected for rows, columns, diagonals"]
+    }
+  ]
+}
+```
+
+## Top-level fields
+
+<ResponseField name="version" type="number" required>
+  Must be exactly `1`. Any other value causes validation to fail with
+  `unsupported plan version <value>`.
+</ResponseField>
+
+<ResponseField name="projectSummary" type="string" required>
+  A non-empty human-readable description of the entire project. Leading and
+  trailing whitespace is trimmed. An empty or whitespace-only value is rejected.
+</ResponseField>
+
+<ResponseField name="architecture" type="object">
+  Optional block describing the high-level design chosen by the planner. When
+  present the object is validated; when absent it is silently omitted.
+
+  <Expandable title="architecture fields">
+    <ResponseField name="architecture.summary" type="string" required>
+      A non-empty description of the design approach. Required when the
+      `architecture` key is present; an empty value is rejected.
+    </ResponseField>
+
+    <ResponseField name="architecture.decisions" type="string[]">
+      Optional list of specific design decisions (e.g. "Use vanilla JS, no
+      framework"). Every element must be a string. If the key is present but
+      the value is not an array of strings the plan is rejected.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="tasks" type="PlannedTask[]" required>
+  A non-empty ordered array of task objects. An empty array is rejected with
+  `plan has no tasks`. See [Task fields](#task-fields) below.
+</ResponseField>
+
+## Task fields
+
+Each element of the `tasks` array must conform to the `PlannedTask` shape.
+
+<ResponseField name="tempId" type="string" required>
+  A unique identifier for this task **within the plan**. Used only for
+  dependency references; it is **not** a database ID. The real UUID is
+  assigned by TaskMaster when the task is inserted into SQLite. A missing or
+  empty `tempId` is rejected. Duplicate values within the same plan are
+  rejected.
+</ResponseField>
+
+<ResponseField name="title" type="string" required>
+  A short, human-readable task title. Whitespace is trimmed. An empty title is
+  rejected.
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  A detailed description of the work to be performed. This is included
+  verbatim in the task's `description` column in SQLite, followed by the
+  acceptance criteria. An empty description is rejected.
+</ResponseField>
+
+<ResponseField name="agent" type="string" required>
+  The role responsible for executing this task. Must be one of:
+
+  | Value | Role |
+  |---|---|
+  | `builder` | Implements source code changes |
+  | `tester` | Verifies implementation correctness |
+  | `validator` | Reviews diff and architecture fit |
+  | `documenter` | Writes and reconciles Markdown memory |
+
+  The `planner` role is **not** a valid value here — the planner creates the
+  plan and must not assign tasks to itself. Any unrecognised string is
+  rejected.
+</ResponseField>
+
+<ResponseField name="dependencies" type="string[]" required>
+  A list of `tempId` values that must reach status `DONE` before this task
+  becomes `READY`. An empty array `[]` means the task has no dependencies and
+  will be inserted directly as `READY`. Every element must be a string; a
+  non-array value is rejected.
+</ResponseField>
+
+<ResponseField name="acceptanceCriteria" type="string[]" required>
+  A non-empty list of concrete, verifiable checks. Each criterion is a plain
+  string. TaskMaster appends these to the task description in SQLite so they
+  are visible to the agent. An empty array or any blank criterion string is
+  rejected.
+</ResponseField>
+
+## Validation rules
+
+`validatePlan` in `src/plan.ts` applies every rule below. All errors are
+collected before throwing so the planner receives the complete list of
+problems at once.
+
+| Rule | Error message |
+|---|---|
+| `version` must be `1` | `unsupported plan version <value>` |
+| `projectSummary` must be a non-empty string | `projectSummary is empty` |
+| `architecture.summary` must be non-empty if `architecture` is present | `architecture.summary is empty` |
+| `architecture.decisions` must be a string array if present | `architecture.decisions must be an array of strings` |
+| `tasks` must be a non-empty array | `plan has no tasks` |
+| Each task must be an object | `task must be an object` |
+| `tempId` must be a non-empty string | `task '<label>' is missing tempId` |
+| `tempId` values must be unique | `duplicate task id '<tempId>'` |
+| `title` must be non-empty | `task '<label>' has an empty title` |
+| `description` must be non-empty | `task '<label>' has an empty description` |
+| `agent` must be one of the four valid plan agents | `task '<label>' has unknown agent '<value>'` |
+| `dependencies` must be a string array | `task '<label>' has invalid dependencies` |
+| `acceptanceCriteria` must be a non-empty string array | `task '<label>' is missing acceptance criteria` |
+| A task must not list its own `tempId` as a dependency | `task '<tempId>' depends on itself` |
+| Every dependency `tempId` must exist in the plan | `task '<tempId>' depends on unknown task '<dep>'` |
+| No circular dependency chains are permitted | `dependency cycle: <t1> -> <t2> -> <t1>` |
+
+Cycle detection uses a depth-first search over the dependency graph. The error
+message includes the full cycle path so the planner can identify which tasks
+are involved.
+
+<Warning>
+  The **entire plan is rejected** if any single validation error is found.
+  TaskMaster will not perform a partial insert. Fix all errors listed in
+  `PlanValidationError.details` before resubmitting.
+</Warning>
+
+## `PlanValidationError`
+
+When validation fails, `validatePlan` throws a `PlanValidationError`. This
+error class extends `Error` and carries a `details` property:
+
+```typescript
+class PlanValidationError extends Error {
+  readonly details: string[]; // one message per error
+}
+```
+
+The `details` array contains every individual error found during validation —
+duplicate IDs, missing fields, unknown agents, and cycle descriptions all
+appear as separate entries. The planner agent receives the full list so it can
+correct every issue in a single revision.
+
+`parsePlanJson` is called before `validatePlan` and handles JSON wrapped in
+Markdown fenced code blocks (` ```json ... ``` `). If the output is not valid
+JSON it throws `PlanValidationError` with the single message
+`"Planner output is not valid JSON"`.

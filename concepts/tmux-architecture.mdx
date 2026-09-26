@@ -1,0 +1,152 @@
+---
+title: "tmux session layout and process ownership"
+sidebarTitle: "tmux Architecture"
+description: "TaskMaster creates a named tmux session with two windows and six panes. SQLite is the source of truth; tmux is the surface a person watches."
+---
+
+TaskMaster uses tmux as a visible terminal surface, not as a state store. Every fact about agent liveness — which process is running, whether it has crashed, what its PID is — comes from SQLite after a probe of the live tmux panes. Pane text is never parsed to infer task or agent state. The authoritative record is always `state.sqlite`.
+
+## Session naming
+
+The tmux session name is derived from the project's git root directory name, slugified to lowercase alphanumeric characters and hyphens:
+
+```typescript
+export function sessionNameForProject(projectName: string): string {
+  const slug = projectName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return `taskmaster-${slug || "project"}`;
+}
+```
+
+For a project whose git root is named `my-app`, the session is `taskmaster-my-app`. This name is stable: a second call to `taskmaster demo` reuses the existing session rather than creating `taskmaster-my-app-1`.
+
+## Two-window layout
+
+Six panes on a single laptop screen are too small to be useful. TaskMaster therefore creates two windows:
+
+### `agents` window — 2×2 grid
+
+```
+┌─────────────────────┬─────────────────────┐
+│      planner        │       builder       │
+│                     │                     │
+├─────────────────────┼─────────────────────┤
+│      tester         │      validator      │
+│                     │                     │
+└─────────────────────┴─────────────────────┘
+```
+
+The layout is built by `createDemoLayout` in `src/tmux.ts`: the planner pane is created first with `new-session`, builder is added with `split-window -h`, tester with `split-window -v` against the planner pane, and validator with `split-window -v` against the builder pane.
+
+### `support` window — side-by-side
+
+```
+┌─────────────────────┬─────────────────────┐
+│     documenter      │   taskmaster-log    │
+│                     │  (event log tail)   │
+└─────────────────────┴─────────────────────┘
+```
+
+The documenter pane is created with `new-window -n support`, and the log pane is added with `split-window -h`. The log pane runs a separate script (`demo-log`) that tails the SQLite `events` table in real time. It is a read-only view, not a second event bus.
+
+Both windows have `pane-border-status top` and `pane-border-format " #{pane_title} "` set, so each pane displays its role name in the border.
+
+## Process ownership
+
+tmux is the parent of each agent process. TaskMaster calls `respawn-pane` to start the command inside an already-allocated pane, then records the pane ID in `agent_executions`:
+
+```typescript
+await respawnPane(paneId, cwd, command, env);
+await selectPaneTitle(paneId, role, env);
+```
+
+The `respawnPane` function translates to:
+
+```bash
+tmux respawn-pane -k -c <cwd> -t <paneId> <command>
+```
+
+The `-k` flag kills any existing process in the pane before starting the new one. After the command starts, the pane title is set to the agent role name so liveness probes can match by title as a fallback.
+
+## Lifecycle reconciliation
+
+`reconcileDemo` in `src/demo.ts` is the function that synchronises SQLite with reality. It:
+
+1. Calls `hasSession` to check whether the tmux session still exists.
+2. If the session is alive, calls `listPanes` to collect a `PaneSnapshot` for every pane — including `pane_dead`, `pane_dead_status` (the exit code), and `pane_pid`.
+3. For each agent role, locates the matching pane by stored `tmux_pane_id`, falling back to the pane whose title matches the role name.
+4. Passes the current `lifecycle` value and the probe result to `nextLifecycle` in `src/lifecycle.ts`:
+
+```typescript
+export function nextLifecycle(current: AgentLifecycle, probe: PaneLiveness): AgentLifecycle {
+  if (!probe.dead) {
+    if (current === "EXITED") return "EXITED";
+    return "RUNNING";
+  }
+  if (current === "CREATED") return "CREATED";
+  if (probe.exitCode === 0) return "EXITED";
+  return "CRASHED";
+}
+```
+
+5. If the lifecycle has changed, writes the updated row to `agent_executions` and appends an event (`AGENT_STARTED`, `AGENT_EXITED`, or `AGENT_CRASHED`).
+
+The transition from `STARTING` or `RESTARTING` to `RUNNING` happens the moment `pane_dead = 0` and a PID is visible. A grace window of two seconds is applied when a pane is newly spawned and still shows `pane_dead = 1`, avoiding a false `CRASHED` before the process has had a chance to start.
+
+If the tmux session has disappeared entirely, any agent recorded as `RUNNING`, `STARTING`, or `RESTARTING` is immediately marked `CRASHED`.
+
+<Note>
+  Pane text is **never** read to determine agent or task state. `reconcileDemo` uses only `pane_dead`, `pane_dead_status`, and `pane_pid` from `list-panes`. The `capturePane` function exists solely to display output to a human on request, not to feed any decision logic.
+</Note>
+
+## Session reuse
+
+When `taskmaster demo` is called and a session named `taskmaster-<project>` already exists, TaskMaster checks whether all five agent pane IDs and the log pane ID stored in `agent_executions` and `demo_sessions` are still present in the live pane list:
+
+```typescript
+const complete = ROLE_ORDER.every((role) => {
+  const execution = stored.find((row) => row.agentId === role);
+  return Boolean(execution?.tmuxPaneId && paneIds.has(execution.tmuxPaneId));
+}) && Boolean(demo?.logPaneId && paneIds.has(demo.logPaneId));
+```
+
+If every pane is accounted for, the existing session is reused and no agents are re-launched. If any pane is missing, the entire session is killed and rebuilt from scratch.
+
+## Manual restart
+
+There is no automatic restart loop. If an agent crashes, it stays `CRASHED` until explicitly restarted with:
+
+```bash
+taskmaster demo restart <role>
+```
+
+This calls `respawnPane` with the stored command, sets the lifecycle to `RESTARTING`, and increments `restart_count` in `agent_executions`. `reconcileDemo` will advance the lifecycle to `RUNNING` on the next probe once the new process appears.
+
+## Detach and reattach
+
+Detach from the session at any time using the standard tmux prefix:
+
+```
+Ctrl-b d
+```
+
+Reattach later with:
+
+```bash
+taskmaster attach
+```
+
+`attachDemo` in `src/demo.ts` calls `attachSession`, which uses `tmux attach-session` when run outside an existing tmux session, or `tmux switch-client` when already inside one:
+
+```typescript
+const args = process.env.TMUX
+  ? ["switch-client", "-t", session]
+  : ["attach-session", "-t", session];
+```
+
+<Tip>
+  Set `TASKMASTER_NO_ATTACH=1` to suppress automatic attachment when running `taskmaster demo` in a non-TTY environment such as a CI script or a remote pipe. Without a TTY, `attach-session` would fail; this variable lets the session start without attempting to attach.
+</Tip>

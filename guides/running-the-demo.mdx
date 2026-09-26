@@ -1,0 +1,135 @@
+---
+title: "Run the TaskMaster demo with mock agents"
+sidebarTitle: "Run the Demo"
+description: "Open a tmux demo session with TaskMaster's five-agent layout, manage individual agent panes, and monitor live agent lifecycle status with taskmaster status."
+---
+
+The `taskmaster demo` command opens a named tmux session and launches all five agents — planner, builder, tester, validator, and documenter. In the demo session the planner and builder panes are wired to OpenCode, while the tester, validator, and documenter panes run lightweight mock agents so you can observe the full layout without a real workload. The demo is the prerequisite for every other TaskMaster command.
+
+## Prerequisites
+
+- **tmux** installed and available on your `PATH` (verify with `taskmaster doctor`)
+- The project directory must be a git repository, or any directory works for the demo layout itself
+
+## Starting the demo
+
+<Steps>
+  <Step title="Launch the session">
+    Run `taskmaster demo` from your project directory:
+
+    ```bash
+    taskmaster demo
+    ```
+
+    If your terminal is a TTY, TaskMaster automatically attaches to the session. If it is not a TTY (for example, in a script or CI environment), it prints the current status instead.
+  </Step>
+
+  <Step title="Explore the two-window layout">
+    The session contains two tmux windows:
+
+    | Window | Panes |
+    | --- | --- |
+    | `agents` | planner (top-left), builder (top-right), tester (bottom-left), validator (bottom-right) — a 2×2 grid |
+    | `support` | documenter (left) + TaskMaster event log (right) |
+
+    The active window when the session opens is `agents`. Switch to the `support` window with your tmux prefix followed by `n` (or `Ctrl-b n` by default).
+  </Step>
+
+  <Step title="Detach from the session">
+    Press **Ctrl-b d** (your tmux prefix + `d`) to detach and return to your shell. The agents continue running in the background.
+  </Step>
+
+  <Step title="Check agent status">
+    From any shell, run:
+
+    ```bash
+    taskmaster status
+    ```
+
+    Example output:
+
+    ```
+    TaskMaster — my-project
+
+    planner       running
+    builder       running
+    tester        running
+    validator     running
+    documenter    running
+
+    tmux session:
+    taskmaster-my-project
+
+    ```
+
+    The lifecycle label for each agent reflects the last tmux liveness probe: `starting`, `running`, `exited`, `crashed`, or `restarting`.
+  </Step>
+
+  <Step title="Re-attach to the session">
+    Return to the tmux session at any time with:
+
+    ```bash
+    taskmaster attach
+    ```
+  </Step>
+</Steps>
+
+## Managing agents
+
+Once the demo is running you can inspect, restart, crash, or stop individual agents without recreating the whole session.
+
+### Check status
+
+```bash
+taskmaster demo status
+```
+
+Equivalent to `taskmaster status` — performs a tmux liveness probe and prints the current lifecycle for every agent.
+
+### Restart an agent pane
+
+```bash
+taskmaster demo restart <role>
+```
+
+Respawns the named pane with its original command and increments `restart_count` in SQLite. Valid roles are `planner`, `builder`, `tester`, `validator`, and `documenter`.
+
+```bash
+taskmaster demo restart builder
+```
+
+### Simulate a crash
+
+```bash
+taskmaster demo crash <role>
+```
+
+Sends `SIGKILL` to the agent's live process, simulating an unexpected crash. Useful for testing recovery flows.
+
+```bash
+taskmaster demo crash tester
+```
+
+### Stop the session
+
+```bash
+taskmaster demo stop
+```
+
+Kills the tmux session and marks all agent executions as `EXITED` in SQLite.
+
+## Session reuse and recreation
+
+<Note>
+  Running `taskmaster demo` a second time reuses the existing session if all five agent panes and the log pane are still alive. If any pane is missing, TaskMaster kills the existing session and recreates it from scratch. You will never end up with a `taskmaster-my-project-1` duplicate.
+</Note>
+
+## Running without auto-attach
+
+<Tip>
+  Set `TASKMASTER_NO_ATTACH=1` to suppress automatic attachment even when stdout is a TTY. This is useful in scripts or CI environments where you want to start the session in the background and inspect it later.
+
+  ```bash
+  TASKMASTER_NO_ATTACH=1 taskmaster demo
+  ```
+</Tip>

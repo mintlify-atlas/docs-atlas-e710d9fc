@@ -1,0 +1,129 @@
+---
+title: "Event types in the TaskMaster event log"
+sidebarTitle: "Event Types"
+description: "The append-only event log, the TaskEvent interface fields, and every known event type string emitted by the planner, builder, and demo subsystems."
+---
+
+TaskMaster uses an append-only `events` table in SQLite for cross-agent
+communication. Every significant state change — a plan being requested, a task
+starting, an agent pane crashing — produces an event row. No event is ever
+deleted or modified; the table is a permanent audit trail that any component
+can query or tail.
+
+The log pane in the `support` tmux window tails this table in real time. Future
+agent prompts will receive a filtered slice of recent events so each agent can
+understand what has happened in the project since it last ran.
+
+## `TaskEvent` interface
+
+Events are read back from SQLite through the `toEvent` function in
+`src/events.ts`, which maps raw rows to the `TaskEvent` interface:
+
+<ResponseField name="id" type="string">
+  UUID primary key. Generated with `randomUUID()` at insert time.
+</ResponseField>
+
+<ResponseField name="projectId" type="string | null">
+  The project this event belongs to. Matches a row in the `projects` table.
+  `null` for events that are not scoped to a specific project.
+</ResponseField>
+
+<ResponseField name="agentId" type="string | null">
+  The agent role that produced the event (e.g. `"planner"`, `"builder"`).
+  `null` when the event is not attributable to a single agent.
+</ResponseField>
+
+<ResponseField name="taskId" type="string | null">
+  The task UUID this event relates to, if any. `null` for plan-level or
+  session-level events that are not tied to a specific task.
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  The event type identifier. See the [Event types table](#event-types-table)
+  below for all known values.
+</ResponseField>
+
+<ResponseField name="summary" type="string">
+  A human-readable one-line description of the event, suitable for display in
+  the log pane.
+</ResponseField>
+
+<ResponseField name="payload" type="Record<string, unknown> | null">
+  Optional structured JSON data attached to the event. The schema varies by
+  event type. Stored as `payload_json TEXT` in SQLite and parsed back to an
+  object on read. `null` when no payload was provided.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp set at insert time. Used as the primary sort key when
+  listing events (`ORDER BY created_at DESC, id DESC`).
+</ResponseField>
+
+## Event types table
+
+The table below lists every event type string emitted across the codebase,
+grouped by the subsystem that produces it.
+
+### Planner events
+
+| Event Type | Producer | Description |
+|---|---|---|
+| `PLAN_REQUESTED` | planner | User submitted a goal. The `payload` includes the model name. |
+| `RUN_STARTED` | planner | A planner run record was created in the `runs` table. `payload` includes `model` and `runId`. |
+| `RUNTIME_STARTED` | planner | The OpenCode process was launched for the planner pane. `payload` includes `model` and `runtime: "opencode"`. |
+| `PLAN_GENERATED` | planner | The planner wrote `plan.json` and the raw content was read back. `payload` includes `taskCount`. |
+| `PLAN_VALIDATED` | planner | `validatePlan` passed. `summary` reports the number of validated tasks. |
+| `TASK_CREATED` | planner | One task was inserted into SQLite for each entry in the validated plan. `payload` includes `tempId`, `agent`, and initial `status`. |
+| `PLAN_PERSISTED` | planner | All tasks were committed to the database. `payload` includes `model`, the `tempId`→`taskId` `mapping` array, and the `architecture` block if present. |
+| `RUN_COMPLETED` | planner | The planner run finished successfully. |
+| `PLAN_REJECTED` | planner | `validatePlan` threw or the planner modified product files. `summary` contains the error message. |
+| `RUN_FAILED` | planner | The planner run ended in failure. Emitted alongside `PLAN_REJECTED`. |
+
+### Builder events
+
+| Event Type | Producer | Description |
+|---|---|---|
+| `TASK_CREATED` | builder | Emitted when `runBuilder` creates an ad-hoc task from a direct prompt. |
+| `TASK_STARTED` | builder | Agent began executing the task inside the builder pane. `payload` includes `model` and `runtime`. |
+| `RUN_STARTED` | builder | A builder run record was created. `payload` includes `model`. |
+| `RUNTIME_STARTED` | builder | OpenCode was launched inside the builder pane. `payload` includes `model` and `runtime: "opencode"`. |
+| `RUN_COMPLETED` | builder | The builder run verified the change successfully. |
+| `RUN_FAILED` | builder | The builder run did not produce a verified git change. |
+| `TASK_COMPLETED` | builder | Task exit-code 0 and git change confirmed. `payload` includes `model`, `exitCode`, `sessionKey`, and `createdFile`. |
+| `TASK_FAILED` | builder | Task failed verification (non-zero exit or no git change). Same `payload` shape as `TASK_COMPLETED`. |
+
+### Demo / session events
+
+| Event Type | Producer | Description |
+|---|---|---|
+| `TMUX_SESSION_CREATED` | demo | A new `taskmaster-<project>` tmux session was started. |
+| `TMUX_SESSION_ATTACHED` | demo | A terminal client attached to an existing session. Emitted both on initial attach and on `taskmaster attach`. |
+| `TMUX_SESSION_STOPPED` | demo | The tmux session was killed via `taskmaster demo stop`. |
+| `AGENT_PANE_CREATED` | demo | A tmux pane was created for an agent role. Emitted once per pane during session setup. |
+| `AGENT_STARTED` | demo | An agent pane transitioned to `RUNNING` lifecycle during the liveness poll. |
+| `AGENT_EXITED` | demo | An agent pane exited normally (exit code 0). |
+| `AGENT_CRASHED` | demo | An agent pane died with a non-zero exit code or unexpectedly. |
+| `AGENT_RESTARTED` | demo | An agent pane was manually restarted via `taskmaster demo restart <role>`. |
+
+## Reading events
+
+```typescript
+import { listEvents } from "./events.js";
+
+const recent = listEvents(db, {
+  projectId: "...",
+  taskId: "...",   // optional — filter to a single task
+  limit: 50,       // default 50, increase as needed
+});
+```
+
+`listEvents` returns events ordered by `created_at DESC` (newest first). The
+log pane calls this continuously to render a live tail. Filtering by `taskId`
+is useful when building per-task audit views.
+
+<Note>
+  Events are **never deleted**. They form an immutable audit trail of
+  everything that happened in a project. Do not rely on event absence as a
+  signal — a missing event type simply means that code path has not been
+  reached yet, not that the operation did not occur.
+</Note>

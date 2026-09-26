@@ -1,0 +1,88 @@
+---
+title: "Task status values and transition rules"
+sidebarTitle: "Task Statuses"
+description: "All nine task status values stored in SQLite, what each means, which transitions are valid, and how promoteReady advances the work pipeline."
+---
+
+Task status is the single source of truth that drives TaskMaster's entire work
+pipeline. Every task row in the `tasks` SQLite table carries a `status` column
+whose value must be one of the nine constants defined in `TASK_STATUSES`. The
+control plane reads and writes this column atomically; no agent may change task
+status by writing to the filesystem or by convention — only the TaskMaster
+process does it.
+
+## Status reference
+
+| Status | Meaning |
+|---|---|
+| `PENDING` | Task has been inserted but at least one dependency has not yet reached `DONE`. The task is waiting and cannot be claimed. |
+| `READY` | All dependencies are `DONE` (or the task has no dependencies). The assigned agent can claim this task. |
+| `RUNNING` | An agent has atomically claimed the task. Work is in progress inside the agent's tmux pane. |
+| `TESTING` | The builder's work is complete; the tester agent is verifying correctness. *(Phase 5+)* |
+| `VALIDATING` | The tester passed; the validator agent is reviewing the diff against the architecture. *(Phase 5+)* |
+| `REWORK` | The validator returned the task to the builder with feedback. The builder must address the issues and the task will re-enter `RUNNING`. *(Phase 6+)* |
+| `DONE` | Every required pipeline stage passed. The task is complete and its dependents may be promoted to `READY`. |
+| `BLOCKED` | The task cannot proceed — either an unresolvable dependency was detected or a human operator manually blocked it. |
+| `FAILED` | The agent run produced an error and the task result was not verified (e.g. OpenCode exited non-zero, or no git change was produced). |
+
+## Claimable statuses
+
+`claimTask` in `src/tasks.ts` only allows a claim when the task is in one of
+four statuses, captured in the `CLAIMABLE` set:
+
+```typescript
+const CLAIMABLE: ReadonlySet<string> = new Set(["PENDING", "READY", "REWORK", "RUNNING"]);
+```
+
+Attempting to claim a task in any other status throws a `TaskClaimError`.
+`RUNNING` is claimable so that the **same** agent can resume a task it already
+owns — a different agent trying to claim a `RUNNING` task it does not own will
+lose the atomic compare-and-swap and also receive a `TaskClaimError`.
+
+## Transition diagram
+
+```
+PENDING ──deps done──► READY ──claimed──► RUNNING
+                                              │
+                         ┌─── exit 0 + git ──►│ DONE  (Phase 1–4 direct)
+                         │
+                         │   (Phase 5+)
+                         └──► TESTING ──► VALIDATING ──► DONE
+                                              │
+                                        rework│
+                                              ▼
+                                           REWORK ──► RUNNING  (resume)
+
+RUNNING ──► FAILED   (verification error: non-zero exit or no git change)
+RUNNING ──► BLOCKED  (manual block or unresolvable dependency)
+```
+
+In Phases 1–4 the builder moves a task directly from `RUNNING` to `DONE` when
+the OpenCode process exits with code 0 **and** at least one new git change is
+detected. If either condition fails the task moves to `FAILED` instead.
+
+<Note>
+  `TESTING` and `VALIDATING` are reserved for Phase 5+. The tester and
+  validator agents are currently mocked and do not perform real verification.
+  Tasks in the current implementation skip directly from `RUNNING` to `DONE`
+  (or `FAILED`) without passing through these two intermediate states.
+</Note>
+
+## `promoteReady`
+
+After any task transitions to `DONE`, `promoteReady` in `src/plan-store.ts` is
+called for the project. It scans all `PENDING` tasks and checks each one's
+`dependencies_json` array. If **every** dependency ID in that array belongs to
+a task that is now `DONE`, the pending task is atomically promoted to `READY`
+using:
+
+```sql
+UPDATE tasks
+SET status = 'READY', updated_at = ?
+WHERE id = ? AND status = 'PENDING'
+```
+
+This cascade fires once per completed task, so a task with multiple
+dependencies only becomes `READY` when the last of those dependencies crosses
+into `DONE`. Tasks that are already `READY`, `RUNNING`, or in any terminal
+state are left untouched.

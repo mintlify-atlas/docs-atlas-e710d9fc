@@ -1,0 +1,125 @@
+---
+title: "Plan a project and run the first builder task"
+sidebarTitle: "Plan a Project"
+description: "Invoke the planner agent with a goal, validate the returned ProjectPlan JSON, persist the task DAG in SQLite, and execute the first READY builder task automatically."
+---
+
+`taskmaster plan "<goal>"` is the high-level entry point for starting a new project or feature. It invokes the planner agent with your goal, validates the JSON plan the planner writes, persists the full task DAG into SQLite, then immediately claims and runs the first `READY` builder task. When the command returns, you have a verified git change and a structured backlog of remaining tasks waiting to be worked.
+
+## Prerequisites
+
+- **OpenCode** installed and authenticated (verify with `taskmaster doctor`)
+- The **demo session is running** — start it with `taskmaster demo` first
+- The project directory is a **git repository**
+- `agents.planner.model` and `agents.builder.model` are configured in `~/.taskmaster/config.json`
+
+## Command
+
+```bash
+taskmaster plan "Build Tic Tac Toe"
+```
+
+## What happens
+
+<Steps>
+  <Step title="Build the planner prompt">
+    TaskMaster assembles a prompt from three inputs: your goal, a tree summary of the repository, and the contents of `skills/planner/SKILL.md`. The skill file tells the planner to keep the implementation minimal, make dependencies explicit, and write only the plan JSON — never touch product source files.
+  </Step>
+
+  <Step title="Run OpenCode in the planner pane">
+    `opencode run --model <agents.planner.model> <prompt>` is sent to the planner's tmux pane. TaskMaster waits for the process to exit (same `TASKMASTER_RUN_TIMEOUT_MS` timeout as the builder, default 3 minutes).
+  </Step>
+
+  <Step title="Read .taskmaster/inbox/plan.json">
+    After OpenCode exits, TaskMaster reads `.taskmaster/inbox/plan.json` from the repository root. If the file is empty or missing, the plan is immediately rejected.
+  </Step>
+
+  <Step title="Validate the ProjectPlan">
+    The JSON is parsed and validated as a `ProjectPlan` (version 1). Validation checks:
+    - `version` equals `1`
+    - `projectSummary` is a non-empty string
+    - Every task has a unique `tempId`, non-empty `title` and `description`, a valid `agent`, a `dependencies` array of known `tempId` values, and at least one `acceptanceCriteria` entry
+    - No dependency cycles exist
+
+    If validation fails for any reason, the **entire plan is rejected** and a `PLAN_REJECTED` event is appended to the event log. The command exits with an error.
+  </Step>
+
+  <Step title="Check for unexpected product file changes">
+    TaskMaster compares git status before and after the planner run. If the planner modified any file outside `.taskmaster/` (other than `.taskmaster/inbox/plan.json` itself), the plan is rejected with _"Planner modified product files"_. The planner is only permitted to write the plan JSON.
+  </Step>
+
+  <Step title="Persist the task DAG">
+    On success, tasks are inserted into SQLite. Tasks with no unmet dependencies are given status `READY`; tasks that depend on others start as `PENDING`. As `READY` tasks complete, `promoteReady` advances the next eligible tasks.
+  </Step>
+
+  <Step title="Run the first READY builder task">
+    TaskMaster claims the earliest `READY` builder task and runs it with `opencode run --model <agents.builder.model>` in the builder pane. Verification is the same as `taskmaster run`: exit code `0` plus at least one new git change. After this step, the command exits.
+  </Step>
+</Steps>
+
+## Example output
+
+```
+Project: Build Tic Tac Toe
+Tasks: 6 (2 READY, 4 PENDING)
+model opencode/nemotron-3.5-lightning-free
+tmux taskmaster-my-project
+run <run-id>
+builder task <task-id> verified
+```
+
+## ProjectPlan JSON structure
+
+The planner must write valid JSON that matches this shape (from `src/plan.ts`):
+
+```json
+{
+  "version": 1,
+  "projectSummary": "Build a Tic Tac Toe game",
+  "architecture": {
+    "summary": "Single HTML file with vanilla JS",
+    "decisions": ["No framework dependencies"]
+  },
+  "tasks": [
+    {
+      "tempId": "t1",
+      "title": "Create index.html",
+      "description": "Create the main HTML file with the game board and basic structure.",
+      "agent": "builder",
+      "dependencies": [],
+      "acceptanceCriteria": ["index.html exists"]
+    }
+  ]
+}
+```
+
+Valid agents for tasks are `builder`, `tester`, `validator`, and `documenter`. The planner role must never appear as a task agent.
+
+## Skip the builder step
+
+Set `TASKMASTER_PLAN_ONLY=1` to validate and persist the plan without running any builder task:
+
+```bash
+TASKMASTER_PLAN_ONLY=1 taskmaster plan "Build Tic Tac Toe"
+```
+
+This is useful when you want to inspect the task list before any code is written.
+
+## Planner constraints
+
+<Note>
+  The planner may **only** write `.taskmaster/inbox/plan.json`. If it modifies any product source file during its run, TaskMaster detects the change via `git status --porcelain` and rejects the plan. This is an intentional guard — re-run `taskmaster plan` if this happens.
+</Note>
+
+## Planner skill rules
+
+The planner agent is guided by `skills/planner/SKILL.md`. The key rules it follows:
+
+- **Minimal implementation** — prefer the smallest change that meets the goal
+- **Inspect before planning** — read the repository tree; do not invent unneeded modules
+- **No speculative architecture** — no plugins, no service mesh, no extra processes
+- **Independently verifiable tasks** — each task can be checked by reading a file or running a command
+- **Explicit dependencies** — each task lists the `tempId` values that must complete first
+- **Concrete acceptance criteria** — at least one checkable condition per task
+- **No overlapping tasks** — one task owns one slice of work
+- **No planner self-assignment** — work is assigned only to `builder`, `tester`, `validator`, or `documenter`

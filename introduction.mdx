@@ -1,0 +1,60 @@
+---
+title: "TaskMaster: tmux-first AI coding orchestrator"
+sidebarTitle: "Introduction"
+description: "TaskMaster is a local CLI orchestrator that coordinates a fixed five-agent AI coding team inside tmux panes, using SQLite for durable state and OpenCode as the AI runtime."
+---
+
+TaskMaster is a command-line orchestrator that runs a fixed five-agent AI coding team directly on your development machine. Instead of delegating to a cloud service or spinning up dynamic worker pools, TaskMaster keeps every agent visible in a tmux session, every task recorded in a local SQLite database, and every decision traceable in an append-only event log. It is designed for developers who want AI-assisted coding workflows that stay local, auditable, and under version control.
+
+## The five-agent team
+
+TaskMaster's team is fixed — there is no dynamic hiring, no company tree, and no agent autonomously spawning other agents. Each role has a defined scope:
+
+| Agent | Writes | Reads |
+|---|---|---|
+| **Planner** | Architecture decisions, context, and the task DAG | Repository, memory, events |
+| **Builder** | Source code, implementation tests, events | Assignment, memory, events |
+| **Tester** | Test status and failure reports | Implementation, memory, events |
+| **Validator** | PASS or REWORK verdict | Diff, tests, architecture, events |
+| **Documenter** | Markdown memory reconciliation | Everything above |
+
+The pipeline flows from user goal through the planner's task DAG, into the builder, through testing and validation, and finally to the documenter. When the validator issues a REWORK verdict, the task returns to the builder — the loop is bounded by a retry limit so it always terminates.
+
+```
+user → planner → builder → tester → validator
+                 ↑            fail / rework
+                 └────────────┘
+planner and documenter run alongside
+documenter finalizes after validation passes
+```
+
+## Core design decisions
+
+**SQLite for state.** A single `state.sqlite` file in `~/.taskmaster` records projects, agents, tasks, runs, sessions, and events. Atomic task ownership is enforced at the database level with a `claimTask` transaction — a task can only be claimed by one agent at a time, and a losing claim must not be retried.
+
+**tmux for visualization.** TaskMaster treats tmux as the surface a person watches, not as the source of truth. The control plane owns state; tmux owns the child processes. The demo session opens two windows: an `agents` window with planner, builder, tester, and validator in a 2×2 grid, and a `support` window with the documenter and a live event log that tails the SQLite event table.
+
+**OpenCode as the AI runtime.** The builder and planner panes run `opencode run --model <configured-model>`. The default model is `opencode/nemotron-3.5-lightning-free`. TaskMaster also detects Cursor, Codex, and Claude Code so you can see which runtimes are available on your machine, even if only OpenCode is used for live agent tasks today.
+
+**Event-driven communication.** Agents do not communicate through a standing chat channel. Each event has an id, timestamp, project, agent, task, type, summary, and an optional JSON payload. Events are durable — appended to SQLite and visible in the support window's log pane.
+
+<Note>
+  TaskMaster has completed through **Phase 4**. The planner and builder are fully operational — `taskmaster plan` runs the planner, validates the resulting task DAG, and executes the first ready builder task. The tester, validator, and documenter are currently **mocked** (they appear in the tmux session but do not make model calls). Full pipeline support is planned for Phase 5 and beyond.
+</Note>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install TaskMaster, run `doctor`, start the demo session, and plan your first project in under ten minutes.
+  </Card>
+  <Card title="Agents and roles" icon="users" href="/concepts/agents-and-roles">
+    Learn what each of the five agents is responsible for, what they write, and what they read.
+  </Card>
+  <Card title="Task lifecycle" icon="arrow-progress" href="/concepts/task-lifecycle">
+    Understand how tasks move from CREATED through READY, RUNNING, and into DONE or REWORK.
+  </Card>
+  <Card title="Running the demo" icon="display" href="/guides/running-the-demo">
+    A step-by-step walkthrough of the `taskmaster demo` tmux session and all its sub-commands.
+  </Card>
+</CardGroup>

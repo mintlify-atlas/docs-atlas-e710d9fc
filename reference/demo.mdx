@@ -1,0 +1,102 @@
+---
+title: "taskmaster demo — launch the multi-agent tmux session"
+sidebarTitle: "demo"
+description: "taskmaster demo starts, stops, restarts, and crashes agents in the multi-agent tmux session. Covers all subcommands: start, status, stop, restart <role>, and crash <role>."
+---
+
+`taskmaster demo` manages the tmux session that hosts the five-agent TaskMaster team. The bare `taskmaster demo` command opens (or reuses) the session and optionally auto-attaches your terminal. Subcommands let you inspect agent states, cleanly shut down the session, respawn individual agents, or forcibly kill a process to test crash recovery.
+
+## `taskmaster demo` — start the session
+
+```bash
+taskmaster demo
+```
+
+Opens the tmux session `taskmaster-<project>` for the current git repository. If a matching session already exists with all expected panes intact it is reused; otherwise any stale session is killed and a fresh one is created.
+
+The session has two windows:
+
+| Window | Panes |
+|--------|-------|
+| `agents` | planner, builder, tester, validator |
+| `support` | documenter, taskmaster-log |
+
+**Auto-attach behavior:** when stdout is a TTY the command attaches to the session automatically after it is started. When stdout is not a TTY (e.g. in a script) the current agent status is printed to stdout instead.
+
+Set `TASKMASTER_NO_ATTACH=1` to suppress auto-attach even in a TTY context:
+
+```bash
+TASKMASTER_NO_ATTACH=1 taskmaster demo
+```
+
+## `taskmaster demo status` — inspect agent states
+
+```bash
+taskmaster demo status
+```
+
+Reconciles the live tmux session against SQLite execution records and prints the current lifecycle of every agent. The output is identical to `taskmaster status`.
+
+```
+TaskMaster — my-project
+
+planner       running
+builder       running
+tester        running
+validator     running
+documenter    running
+
+tmux session:
+taskmaster-my-project
+```
+
+## `taskmaster demo stop` — shut down the session
+
+```bash
+taskmaster demo stop
+```
+
+Kills the tmux session with `tmux kill-session`. After termination, every agent's lifecycle is set to `EXITED` in SQLite and a `TMUX_SESSION_STOPPED` event is appended to the event log.
+
+## `taskmaster demo restart <role>` — respawn an agent
+
+```bash
+taskmaster demo restart planner
+taskmaster demo restart builder
+taskmaster demo restart tester
+taskmaster demo restart validator
+taskmaster demo restart documenter
+```
+
+Respawns the named agent's tmux pane using the command that was stored when the session was originally created. TaskMaster:
+
+1. Increments `restart_count` on the execution record.
+2. Sets the agent's lifecycle to `RESTARTING`.
+3. Sends a `AGENT_RESTARTED` event to the event log.
+4. Calls `respawn-pane` on the existing pane, then restores the pane title to the role name.
+
+The updated status table is printed after the restart.
+
+## `taskmaster demo crash <role>` — force-kill an agent
+
+```bash
+taskmaster demo crash builder
+```
+
+Sends `SIGKILL` to the named agent's process and waits up to **4 seconds** for the tmux pane to enter the dead state. The updated status table is then printed.
+
+This command is intended for testing crash detection and recovery — it lets you observe how TaskMaster reconciles a missing pane and transitions the lifecycle to `CRASHED`.
+
+<Warning>
+  `taskmaster demo crash` sends an immediate `SIGKILL`. There is no graceful shutdown: any unsaved in-memory state in the agent process is permanently lost. Use `taskmaster demo restart` if you want a clean respawn without data loss.
+</Warning>
+
+## Valid role values
+
+The `<role>` argument for `restart` and `crash` must be one of the five fixed team members:
+
+```
+planner  builder  tester  validator  documenter
+```
+
+Providing any other value exits with code `2` and prints the expected role list.

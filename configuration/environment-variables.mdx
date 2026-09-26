@@ -1,0 +1,100 @@
+---
+title: "TaskMaster environment variable reference"
+sidebarTitle: "Environment Variables"
+description: "Complete reference for all environment variables that control TaskMaster's state directory, timeouts, agent behaviour, and runtime authentication."
+---
+
+TaskMaster reads a small set of environment variables at startup to control where state is stored, how long agent runs are allowed to take, and whether certain automatic behaviours should be suppressed. Additional variables are read by the runtime-detection layer to determine whether each AI runtime is authenticated. None of these variables need to be set for a basic local workflow — the defaults work out of the box.
+
+## TaskMaster core variables
+
+<ParamField query="TASKMASTER_HOME" type="string" default="~/.taskmaster">
+  Overrides the global state directory. All TaskMaster data — `config.json`,
+  `state.sqlite`, and the `secrets/` directory — is stored under this path.
+  When unset, TaskMaster defaults to `~/.taskmaster` inside the current user's
+  home directory.
+</ParamField>
+
+<ParamField query="TASKMASTER_PROJECT_ID" type="string">
+  Overrides the project ID used when launching demo agents. When set, TaskMaster
+  skips the normal git-root-based project lookup and uses this value directly.
+  This variable is set automatically by `taskmaster demo` when it spawns the
+  agent panes so that each pane can reference the correct project record in
+  SQLite.
+</ParamField>
+
+<ParamField query="TASKMASTER_RUN_TIMEOUT_MS" type="number" default="180000">
+  Maximum time in milliseconds that a single builder or planner run is allowed
+  to take before TaskMaster considers it timed out. The default is `180000`
+  (3 minutes). Increase this value for large tasks or slow models. The value is
+  parsed with `Number()` at runtime, so passing an integer string is sufficient.
+</ParamField>
+
+<ParamField query="TASKMASTER_PLAN_ONLY" type="string">
+  When set to `"1"`, `taskmaster plan` generates and validates a plan but does
+  **not** execute the first ready builder task afterward. The plan is still
+  written to `.taskmaster/inbox/plan.json` and persisted to SQLite. Any value
+  other than `"1"` (including an unset variable) causes the normal behaviour:
+  plan, then run one ready builder task.
+</ParamField>
+
+<ParamField query="TASKMASTER_NO_ATTACH" type="string">
+  When set to any non-empty value, `taskmaster demo` will not automatically
+  attach to the tmux session after starting it. Useful for scripts and CI
+  pipelines where there is no terminal to attach to. When unset and stdout is a
+  TTY, TaskMaster attaches automatically.
+</ParamField>
+
+## Runtime authentication variables
+
+These variables are read by `taskmaster doctor` and by the runtime-detection layer at the start of every run. Setting any of them removes the need for the corresponding local credential file.
+
+<ParamField query="CURSOR_API_KEY" type="string">
+  Marks the Cursor runtime as authenticated when set and non-empty. Equivalent
+  to having a valid `~/.cursor/cli-config.json`.
+</ParamField>
+
+<ParamField query="OPENAI_API_KEY" type="string">
+  Marks both the Codex runtime and the OpenCode runtime as authenticated when
+  set and non-empty.
+</ParamField>
+
+<ParamField query="ANTHROPIC_API_KEY" type="string">
+  Marks both the OpenCode runtime and the Claude runtime as authenticated when
+  set and non-empty.
+</ParamField>
+
+<ParamField query="OPENROUTER_API_KEY" type="string">
+  Marks the OpenCode runtime as authenticated when set and non-empty.
+</ParamField>
+
+<ParamField query="CLAUDE_CODE_OAUTH_TOKEN" type="string">
+  Marks the Claude runtime as authenticated when set and non-empty. Used as an
+  alternative to `ANTHROPIC_API_KEY` for OAuth-based Claude Code sessions.
+</ParamField>
+
+<ParamField query="CLAUDE_CONFIG_DIR" type="string" default="~/.claude">
+  Overrides the directory that TaskMaster searches for Claude credential files
+  (`credentials.json` and `.credentials.json`). When unset, both files are
+  looked up under `~/.claude/`.
+</ParamField>
+
+<ParamField query="XDG_DATA_HOME" type="string" default="~/.local/share">
+  Overrides the XDG base data directory. TaskMaster uses this to locate
+  OpenCode's credential file at `$XDG_DATA_HOME/opencode/auth.json`. When
+  unset, the path defaults to `~/.local/share/opencode/auth.json`.
+</ParamField>
+
+<Note>
+  `TASKMASTER_HOME` must be an absolute path. If you supply a relative path,
+  TaskMaster resolves it against the current working directory using
+  `path.resolve()`, which may produce unexpected results depending on where you
+  invoke the CLI.
+</Note>
+
+<Tip>
+  Set `TASKMASTER_PLAN_ONLY=1` in automated scripts when you want to inspect or
+  modify the generated plan before any code is written. After reviewing
+  `.taskmaster/inbox/plan.json`, run `taskmaster run --agent builder "..."` to
+  execute individual tasks manually.
+</Tip>

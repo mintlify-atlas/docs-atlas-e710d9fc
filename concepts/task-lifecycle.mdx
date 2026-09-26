@@ -1,0 +1,140 @@
+---
+title: "Task lifecycle and ownership in TaskMaster"
+sidebarTitle: "Task Lifecycle"
+description: "Tasks move through nine statuses from PENDING to DONE, claimed atomically. A failed validation returns a task to REWORK for the builder to address."
+---
+
+Every unit of work in TaskMaster is a task row in SQLite. Tasks are created by the planner, claimed by agents, and advance through a fixed set of statuses. No agent can silently take ownership of a task that belongs to another — ownership is enforced at the database level by a single compare-and-set transaction. The complete set of statuses comes from `TASK_STATUSES` in `src/db.ts`:
+
+```typescript
+export const TASK_STATUSES = [
+  "PENDING",
+  "READY",
+  "RUNNING",
+  "TESTING",
+  "VALIDATING",
+  "REWORK",
+  "DONE",
+  "BLOCKED",
+  "FAILED",
+] as const;
+```
+
+## Status flow
+
+```
+         ┌──────────────────────────────────────┐
+         │                                      │
+PENDING ──► READY ──► RUNNING ──► TESTING ──► VALIDATING ──► DONE
+                        ▲                         │
+                        │         REWORK ◄────────┘
+                        └────────────┘
+```
+
+Tasks that cannot proceed because of an unresolvable external condition land in **BLOCKED**. Tasks that exhaust retries or encounter a fatal error land in **FAILED**. Both are dead ends and are not automatically recovered.
+
+| Status       | Meaning                                                                              |
+|--------------|--------------------------------------------------------------------------------------|
+| `PENDING`    | Created but waiting for one or more dependencies to reach `DONE`                     |
+| `READY`      | All dependencies satisfied; available for a builder to claim                         |
+| `RUNNING`    | Claimed by an agent (the builder); implementation is in progress                     |
+| `TESTING`    | Builder work complete; the tester is running the test suite                          |
+| `VALIDATING` | Tests passed; the validator is reviewing the diff against acceptance criteria         |
+| `REWORK`     | Validator issued a REWORK decision; task returned to the builder                     |
+| `DONE`       | Validator issued a PASS; task is complete and counts as a satisfied dependency       |
+| `BLOCKED`    | Task cannot proceed; human intervention required                                      |
+| `FAILED`     | Terminal failure; task will not be retried automatically                              |
+
+## The `TaskRow` interface
+
+Each task is represented in memory as a `TaskRow`:
+
+```typescript
+export interface TaskRow {
+  id: string;
+  project_id: string;
+  parent_id: string | null;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  owner_agent_id: string | null;
+  dependencies_json: string;
+  branch: string | null;
+  worktree: string | null;
+  result: string | null;
+  created_at: string;
+  updated_at: string;
+}
+```
+
+`dependencies_json` is a JSON array of task UUIDs that must all be `DONE` before this task can become `READY`. `owner_agent_id` references the `agents` table and is `null` until the task is claimed. `result` holds an optional structured outcome written by the completing agent.
+
+## Promoting tasks to READY
+
+Tasks start as `PENDING` when their `dependencies_json` array is non-empty. The `promoteReady` function in `src/plan-store.ts` scans all `PENDING` tasks for a project and promotes any whose every dependency has reached `DONE`:
+
+```typescript
+export function promoteReady(db: DatabaseSync, projectId: string): TaskRow[] {
+  const rows = db.prepare("SELECT * FROM tasks WHERE project_id = ?").all(projectId) as unknown as TaskRow[];
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const promoted: TaskRow[] = [];
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    if (row.status !== "PENDING") continue;
+    const dependencies = JSON.parse(row.dependencies_json) as string[];
+    const satisfied = dependencies.every((id) => byId.get(id)?.status === "DONE");
+    if (!satisfied) continue;
+    db.prepare(
+      "UPDATE tasks SET status = 'READY', updated_at = ? WHERE id = ? AND status = 'PENDING'"
+    ).run(now, row.id);
+    promoted.push(getTask(db, row.id));
+  }
+  return promoted;
+}
+```
+
+Tasks with an empty `dependencies_json` array skip `PENDING` entirely and are inserted directly as `READY` by `insertPlan`.
+
+## Atomic task claiming with `claimTask`
+
+Ownership is enforced by a single database transaction in `src/tasks.ts`. The allowed statuses for a new claim are:
+
+```typescript
+const CLAIMABLE: ReadonlySet<string> = new Set(["PENDING", "READY", "REWORK", "RUNNING"]);
+```
+
+The transaction opens with `BEGIN IMMEDIATE`, reads the current row, validates that the status is claimable and that the owner is either `null` or already this agent, then executes a conditional `UPDATE` that matches on all three criteria simultaneously:
+
+```typescript
+const result = db.prepare(
+  `UPDATE tasks
+   SET owner_agent_id = ?, status = 'RUNNING', updated_at = ?
+   WHERE id = ?
+     AND status = ?
+     AND (owner_agent_id IS NULL OR owner_agent_id = ?)`
+).run(agentId, now, taskId, current.status, agentId);
+```
+
+If `result.changes` is not exactly `1`, another writer won the race. The transaction rolls back and a `TaskClaimError` is thrown immediately.
+
+The same-owner reclaim path (where `owner_agent_id` is already `agentId`) is intentional: a builder that picks up a `REWORK` task it previously owned uses the same code path without any special case.
+
+### `TaskClaimError`
+
+```typescript
+export class TaskClaimError extends Error {
+  readonly taskId: string;
+  readonly ownerAgentId: string | null;
+  readonly status: string;
+}
+```
+
+A `TaskClaimError` carries the `taskId`, the current `ownerAgentId`, and the current `status` at the moment of conflict.
+
+<Warning>
+  A losing claim **must not be retried** for the same task. `TaskClaimError` means another agent now owns that task. Retrying would create a busy-loop against a task that is legitimately in progress. Move on and wait for a different `READY` task or for the event stream to indicate the task has become available again.
+</Warning>
+
+## Rework branch
+
+When the validator decides that builder output does not meet the acceptance criteria, the task moves to `REWORK`. From there the builder can reclaim it — the same-owner check in `claimTask` permits this — make the requested changes, and push the task back through `TESTING` and `VALIDATING`. There is no limit on rework cycles enforced by the core state machine; higher-level policy (or a `FAILED` terminal transition) controls runaway loops.

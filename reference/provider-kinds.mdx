@@ -1,0 +1,131 @@
+---
+title: "Provider kinds and the provider registry"
+sidebarTitle: "Provider Kinds"
+description: "The six provider kinds stored in the SQLite providers table, the ProviderRecord schema, and how API keys are referenced without being stored in the project repo."
+---
+
+TaskMaster stores provider configurations in the `providers` SQLite table.
+Providers represent external AI APIs that runtimes (such as OpenCode) call on
+behalf of agents. A provider record captures the kind of API, a human-readable
+label, an optional base URL for self-hosted or compatible endpoints, a
+reference to the secret holding the API key, and a default model. The actual
+API key is **never** stored in SQLite — only a reference name that points to a
+file in `~/.taskmaster/secrets/`.
+
+## Provider kinds
+
+The `PROVIDER_KINDS` constant in `src/providers/registry.ts` defines all valid
+values for the `kind` field:
+
+| Kind | Description |
+|---|---|
+| `openrouter` | [OpenRouter](https://openrouter.ai) — unified API gateway for many models |
+| `openai` | OpenAI API (api.openai.com) |
+| `anthropic` | Anthropic API (api.anthropic.com) |
+| `openai-compatible` | Any API that implements the OpenAI REST interface (custom `baseUrl` required) |
+| `ollama` | Local Ollama instance; set `baseUrl` to the Ollama server address |
+| `custom-cli` | Arbitrary CLI command invoked as the runtime; does not use a REST API |
+
+Passing any string outside this set to `addProvider` raises
+`Error: Unknown provider kind <value>`.
+
+## `ProviderRecord` fields
+
+<ResponseField name="id" type="string">
+  UUID primary key, generated with `randomUUID()` at insert time.
+</ResponseField>
+
+<ResponseField name="kind" type="ProviderKind">
+  One of the six provider kind strings listed above. Validated at write time
+  by `addProvider`.
+</ResponseField>
+
+<ResponseField name="label" type="string">
+  A human-readable name for this provider entry (e.g. `"My OpenRouter key"`
+  or `"Local Ollama"`). Not required to be unique.
+</ResponseField>
+
+<ResponseField name="baseUrl" type="string | null">
+  Base URL used by the runtime when making API calls. Required for
+  `openai-compatible` and `ollama` kinds. Stored as `base_url` in SQLite.
+  `null` for managed APIs like `openai` and `anthropic` that have fixed
+  endpoints.
+</ResponseField>
+
+<ResponseField name="apiKeyRef" type="string | null">
+  Reference name for the secret holding the API key. This is a filename stem
+  inside `~/.taskmaster/secrets/` — for example `"openrouter"` refers to
+  `~/.taskmaster/secrets/openrouter`. The key itself is **never** stored in
+  SQLite, `config.json`, or the project repository. `null` for local providers
+  such as `ollama` and `custom-cli` that do not require a key. Stored as
+  `api_key_ref` in SQLite.
+</ResponseField>
+
+<ResponseField name="defaultModel" type="string | null">
+  The default model identifier for this provider (e.g.
+  `"anthropic/claude-3.5-sonnet"`). Agents may override this per-task. Stored
+  as `default_model` in SQLite. `null` if no default has been configured.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp set when the record was first inserted.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 timestamp updated on every write. Currently set to the same value
+  as `createdAt` because the registry has no update path yet.
+</ResponseField>
+
+## Secrets model
+
+API keys are stored by reference, not by value. The `apiKeyRef` field holds a
+filename stem. At runtime, `SecretStore` (implemented as `FileSecretStore` in
+Phase 1) resolves the full path:
+
+```
+~/.taskmaster/secrets/<apiKeyRef>
+```
+
+Each secret file is created with mode `0600` so only the owner can read it.
+The `~/.taskmaster/secrets/` directory itself is mode `0700`. Neither the key
+value nor the path is ever written to `config.json` or committed to the
+project git repository.
+
+This design means the `providers` table can be inspected or exported safely —
+it contains only a label, a kind, and an optional URL, none of which are
+sensitive on their own.
+
+## Registry functions
+
+```typescript
+import { addProvider, listProviders, getProvider } from "./providers/registry.js";
+
+// Add a new provider
+const record = addProvider(db, {
+  kind: "openrouter",
+  label: "My OpenRouter key",
+  apiKeyRef: "openrouter",          // resolves to ~/.taskmaster/secrets/openrouter
+  defaultModel: "anthropic/claude-3.5-sonnet",
+});
+
+// List all providers
+const all = listProviders(db);     // ordered by created_at ASC
+
+// Fetch a single provider by UUID
+const one = getProvider(db, record.id);
+```
+
+<Note>
+  No `provider add` CLI command exists yet — that feature is planned for
+  Phase 9. The `providers` table and the `addProvider` / `listProviders`
+  functions are available in the database layer and are ready for use by
+  future CLI commands and agent configuration flows.
+</Note>
+
+<Info>
+  Phase 9 will introduce `taskmaster provider add openrouter` with an
+  interactive key prompt. The command will write the key to
+  `~/.taskmaster/secrets/openrouter` (mode `0600`) and insert a
+  `ProviderRecord` row with `apiKeyRef: "openrouter"`. No key value will
+  appear in command history or SQLite.
+</Info>

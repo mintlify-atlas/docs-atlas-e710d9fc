@@ -1,0 +1,83 @@
+---
+title: "taskmaster doctor — environment health check"
+sidebarTitle: "doctor"
+description: "Run taskmaster doctor to check tmux, git, and all four AI runtimes (Cursor, Codex, OpenCode, Claude). Interpret the ✓/○/✗ symbols to fix your environment before starting a session."
+---
+
+`taskmaster doctor` scans your machine for every dependency TaskMaster needs — tmux, git, and each supported AI runtime — and prints a concise health report. It also detects the current git project and records it in the local SQLite database. Running `taskmaster` with no arguments is exactly equivalent to running `taskmaster doctor`.
+
+## Synopsis
+
+```bash
+taskmaster
+taskmaster doctor
+```
+
+Both invocations are identical. The bare `taskmaster` command is a convenience alias so you can quickly check system health from any project directory.
+
+## What it checks
+
+Doctor runs all probes concurrently and groups them into three categories:
+
+1. **tmux** — verifies the `tmux` binary is on `PATH` and responds correctly. This is required for all session commands.
+2. **git** — verifies the `git` binary is on `PATH` via `git --version`. Required for project detection and by the builder and planner agents.
+3. **AI runtimes** — four runtimes are probed in sequence:
+   - **Cursor** — checks installation and authentication state
+   - **Codex** — checks installation and authentication state
+   - **OpenCode** — checks installation and authentication state (the default runtime for builder and planner)
+   - **Claude** — checks installation and authentication state
+
+## Output format
+
+```
+TaskMaster doctor
+
+Project  my-project (/home/user/projects/my-project)
+State    /home/user/.taskmaster
+
+tmux         ✓
+git          ✓
+Cursor       ○ installed
+Codex        ○ installed
+OpenCode     ✓ authenticated
+Claude       ✗ unavailable
+```
+
+Each row shows the dependency name padded to a fixed width, a symbol, and an optional detail string.
+
+### Symbol meanings
+
+| Symbol | Mark | Meaning |
+|--------|------|---------|
+| `✓` | `ok` | The dependency is present and authenticated (or requires no auth). |
+| `○` | `missing` | The binary is installed but authentication is absent or unverifiable. |
+| `✗` | `error` | The dependency is not installed, not on `PATH`, or returned an error. |
+
+## `DoctorReport` structure
+
+The report object returned by `runDoctor()` has the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `projectName` | `string \| null` | Name derived from the git repository root directory, or `null` if not in a git repo. |
+| `projectRoot` | `string \| null` | Absolute path to the git repository root, or `null` if not in a git repo. |
+| `home` | `string` | Path to the TaskMaster state directory (default `~/.taskmaster`). |
+| `lines` | `DoctorLine[]` | One entry per checked dependency. Each has `label`, `mark` (`"ok"`, `"missing"`, or `"error"`), and `detail`. |
+| `ok` | `boolean` | `true` only when both tmux **and** git checks pass. |
+
+## Exit codes
+
+| Code | Condition |
+|------|-----------|
+| `0` | Both `tmux` and `git` are available (`report.ok === true`). |
+| `1` | Either `tmux` or `git` is missing or errored. |
+
+Runtime check results (Cursor, Codex, OpenCode, Claude) do **not** affect the exit code — only tmux and git are required for TaskMaster to function.
+
+<Note>
+  Project detection runs `git rev-parse --show-toplevel` in the current working directory. If you are not inside a git repository, the `Project` line shows `(not a git repository)` but doctor still runs all other checks and returns the correct exit code.
+</Note>
+
+<Note>
+  Doctor does not make any AI API calls. It only checks whether the runtime binary exists on `PATH` and whether expected credential files are present on disk. No network requests are made.
+</Note>

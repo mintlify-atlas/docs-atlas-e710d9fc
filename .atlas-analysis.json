@@ -1,0 +1,115 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "TaskMaster",
+  "projectDescription": "A tmux-first CLI orchestrator that coordinates a fixed five-agent AI coding team (planner, builder, tester, validator, documenter) using SQLite for state and OpenCode as the AI runtime.",
+  "theme": "aspen",
+  "primaryColor": "#5B6AF0",
+  "lightColor": "#EEF0FE",
+  "darkColor": "#1E2340",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/agents-and-roles",
+              "concepts/task-lifecycle",
+              "concepts/state-and-storage",
+              "concepts/tmux-architecture"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/config-file",
+              "configuration/runtimes",
+              "configuration/environment-variables"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/running-the-demo",
+              "guides/running-the-builder",
+              "guides/planning-a-project",
+              "guides/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "CLI Commands",
+            "pages": [
+              "reference/doctor",
+              "reference/demo",
+              "reference/run",
+              "reference/plan",
+              "reference/status-attach"
+            ]
+          },
+          {
+            "group": "Internals",
+            "pages": [
+              "reference/plan-schema",
+              "reference/task-statuses",
+              "reference/event-types",
+              "reference/provider-kinds"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Fixed five-agent team: planner, builder, tester, validator, and documenter",
+    "tmux-first layout with two windows (agents and support) for full terminal visibility",
+    "SQLite-backed state at ~/.taskmaster — tasks, runs, sessions, events, and providers",
+    "Atomic task ownership via compare-and-set claimTask transactions",
+    "OpenCode AI runtime integration with explicit --model flag on every invocation",
+    "AI-generated ProjectPlan validation with cycle detection and dependency resolution",
+    "Doctor command for environment and runtime health checks",
+    "Event-driven inter-agent communication via append-only event log",
+    "Secrets stored with 0600 permissions, never in the project repository",
+    "Git worktree-based project identity detection"
+  ],
+  "publicApiSurface": [
+    "taskmaster (alias for taskmaster doctor)",
+    "taskmaster doctor",
+    "taskmaster demo",
+    "taskmaster demo status",
+    "taskmaster demo restart <role>",
+    "taskmaster demo crash <role>",
+    "taskmaster demo stop",
+    "taskmaster status",
+    "taskmaster attach",
+    "taskmaster run --agent builder \"<prompt>\"",
+    "taskmaster plan \"<goal>\"",
+    "taskmaster help",
+    "TASKMASTER_HOME env var",
+    "TASKMASTER_PROJECT_ID env var",
+    "TASKMASTER_RUN_TIMEOUT_MS env var",
+    "TASKMASTER_PLAN_ONLY env var",
+    "TASKMASTER_NO_ATTACH env var",
+    "TaskMasterConfig interface",
+    "AgentAssignment interface",
+    "ProjectPlan schema (version 1)",
+    "PlannedTask schema",
+    "TaskRow / TaskStatus types",
+    "AgentRole: planner | builder | tester | validator | documenter",
+    "ProviderKind: openrouter | openai | anthropic | openai-compatible | ollama | custom-cli",
+    "RuntimeId: cursor | codex | opencode | claude"
+  ]
+}

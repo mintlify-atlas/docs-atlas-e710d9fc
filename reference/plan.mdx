@@ -1,0 +1,68 @@
+---
+title: "taskmaster plan — generate and execute a project plan"
+sidebarTitle: "plan"
+description: "taskmaster plan runs the planner agent with OpenCode, validates the resulting ProjectPlan JSON, inserts the task DAG into SQLite, and immediately executes the first READY builder task."
+---
+
+`taskmaster plan` is the high-level entry point for starting a new project or feature. It invokes the planner agent, which uses OpenCode to generate a structured `ProjectPlan` from your goal description. The plan is validated for schema correctness, dependency cycles, and containment — then inserted into SQLite as a task DAG. Unless you opt out, the first READY builder task is executed immediately.
+
+## Synopsis
+
+```bash
+taskmaster plan "<goal>"
+```
+
+## What happens
+
+1. **Load config** — reads `agents.planner.model` from `~/.taskmaster/config.json` (default: `opencode/nemotron-3.5-lightning-free`).
+2. **Ensure demo session** — starts the tmux session `taskmaster-<project>` if it is not already running.
+3. **Build planner prompt** — combines your `<goal>`, a snapshot of the repository file tree, and the contents of `skills/planner/SKILL.md` into the prompt sent to OpenCode.
+4. **Run OpenCode** — executes `opencode run --model <model> <prompt>` in the planner tmux pane and waits for it to finish (up to `TASKMASTER_RUN_TIMEOUT_MS`, default 180 000 ms).
+5. **Read plan file** — reads `.taskmaster/inbox/plan.json` from the repository root.
+6. **Validate plan** — the file must parse as a version-1 `ProjectPlan` JSON object. Validation includes:
+   - JSON schema conformance
+   - Dependency existence (every referenced task ID must exist in the plan)
+   - Cycle detection in the dependency graph
+7. **Rejection path** — if validation fails for any reason, a `PLAN_REJECTED` event is appended to the SQLite event log and an error is thrown (exit code `1`).
+8. **Persist plan** — if valid, all tasks are inserted into SQLite. Tasks whose dependencies are already resolved are set to `READY`; others remain `BLOCKED`.
+9. **Write architecture memory** — if the plan includes an `architecture` section, it is written to `.taskmaster/memory/ARCHITECTURE.md` for use by subsequent agents.
+10. **Run first builder task** — unless `TASKMASTER_PLAN_ONLY=1` is set, the first `READY` task owned by the builder agent is claimed and executed via `opencode run`.
+
+## Output
+
+```
+Project: <projectSummary>
+Tasks: <N> (<M> READY)
+model opencode/nemotron-3.5-lightning-free
+tmux taskmaster-<project>
+run <uuid>
+builder task <task-id> verified
+```
+
+The last line (`builder task … verified`) is omitted when `TASKMASTER_PLAN_ONLY=1` is set or when there are no immediately READY builder tasks.
+
+## Environment variables
+
+<ParamField path="TASKMASTER_PLAN_ONLY" type="string">
+  Set to `1` to skip builder execution after a successful plan. The plan is generated, validated, and persisted, but no builder task is started.
+
+  ```bash
+  TASKMASTER_PLAN_ONLY=1 taskmaster plan "Build a REST API for user management"
+  ```
+</ParamField>
+
+<ParamField path="TASKMASTER_RUN_TIMEOUT_MS" type="number">
+  Timeout in milliseconds for both the planner OpenCode run and the subsequent builder run. Defaults to `180000` (3 minutes).
+</ParamField>
+
+## Exit codes
+
+| Code | Condition |
+|------|-----------|
+| `0` | Plan validated, persisted, and (if applicable) first builder task verified. |
+| `1` | Plan rejected by validation, builder task failed verification, or an unexpected runtime error. |
+| `2` | No goal argument supplied. |
+
+<Warning>
+  The planner agent must **only** write `.taskmaster/inbox/plan.json`. If OpenCode modifies any other file outside the `.taskmaster/` directory during the planner run, validation detects the unexpected product changes and rejects the plan with a `PLAN_REJECTED` event. Ensure your planner skill prompt enforces this boundary.
+</Warning>

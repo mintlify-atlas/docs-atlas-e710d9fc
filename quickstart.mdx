@@ -1,47 +1,177 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get started with TaskMaster"
+sidebarTitle: "Quickstart"
+description: "Install TaskMaster from source, verify your environment with doctor, launch the five-agent tmux demo, and run your first AI-powered plan — all in under ten minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This guide walks you through everything you need to get TaskMaster running: cloning and building from source, verifying your environment, launching the five-agent tmux demo session, and using `taskmaster plan` to hand a goal to the planner and watch the first builder task execute.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+
+  <Step title="Check prerequisites">
+    TaskMaster requires the following tools to be installed before you begin:
+
+    - **Node.js ≥ 22.13** — TaskMaster uses the `node:sqlite` built-in module, which was stabilised in Node 22.13.
+    - **tmux** — any recent version; TaskMaster uses it to create and manage the agent session.
+    - **git** — used for project detection (TaskMaster identifies a project by its git root).
+    - **OpenCode** — installed and authenticated. The builder and planner panes invoke `opencode run --model <model>` directly.
+
+    Verify your Node version before continuing:
 
     ```bash
-    npm install your-package
+    node --version
+    # must print v22.13.0 or higher
     ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+    To check that OpenCode is on your PATH:
 
     ```bash
-    your-cli init
+    opencode --version
     ```
+
+    If OpenCode is not yet authenticated, run `opencode` interactively and complete the login flow before proceeding.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Clone and build">
+    Clone the TaskMaster repository and install dependencies:
 
     ```bash
-    your-cli start
+    git clone https://github.com/adi3120/TaskMaster.git
+    cd TaskMaster
+    npm install
+    ```
+
+    Then compile the TypeScript source:
+
+    ```bash
+    npm run build
+    ```
+
+    `npm run build` runs `tsc`. The compiled output lands in `dist/`. The only dependencies are dev-only: `typescript`, `@types/node`, and `vitest` — there are no production `node_modules` to ship.
+  </Step>
+
+  <Step title="Link globally">
+    Make the `taskmaster` binary available on your PATH by linking the package:
+
+    ```bash
+    npm link
+    ```
+
+    Confirm the link worked:
+
+    ```bash
+    taskmaster help
+    ```
+
+    You should see the full usage text printed to your terminal.
+
+    <Tip>
+      If you need to keep multiple copies of TaskMaster around (for example, to test a branch in isolation), you can skip `npm link` and invoke the CLI directly with `npm run taskmaster -- <command>` from inside the repository directory. This runs `tsc` and then `node dist/cli.js` in one step.
+    </Tip>
+  </Step>
+
+  <Step title="Run doctor">
+    `taskmaster doctor` scans your machine and prints the status of every required tool and AI runtime:
+
+    ```bash
+    taskmaster doctor
+    ```
+
+    Example output from a machine where OpenCode is installed and authenticated, tmux and git are present, but Cursor and Codex are not installed:
+
+    ```
+    TaskMaster doctor
+
+    Project  my-app (/home/user/projects/my-app)
+    State    /home/user/.taskmaster
+
+    tmux         ✓
+    git          ✓
+    Cursor       ○ unavailable
+    Codex        ○ unavailable
+    OpenCode     ✓ authenticated
+    Claude       ○ unavailable
+    ```
+
+    The symbols mean:
+
+    | Symbol | Meaning |
+    |---|---|
+    | `✓` | Present (and authenticated, where applicable) |
+    | `○` | Not installed |
+    | `✗` | Detected but an error occurred |
+
+    Doctor also initialises `~/.taskmaster` if it does not exist yet, writes a default `config.json`, and opens (or creates) the SQLite database. The exit code is `0` when tmux and git are both present, `1` otherwise.
+  </Step>
+
+  <Step title="Start the demo session">
+    Launch the five-agent tmux session:
+
+    ```bash
+    taskmaster demo
+    ```
+
+    If your terminal is a TTY, TaskMaster attaches you to the session automatically. You will see two tmux windows:
+
+    - **`agents`** — a 2×2 grid of panes: planner (top-left), builder (top-right), tester (bottom-left), validator (bottom-right).
+    - **`support`** — the documenter pane on the left and the TaskMaster event log on the right.
+
+    The event log tails the SQLite event table in real time, so every agent action appears there as it happens.
+
+    <Warning>
+      The builder pane requires OpenCode to be installed and the `agents.builder.model` field to be set in `~/.taskmaster/config.json`. The default config is written automatically with `opencode/nemotron-3.5-lightning-free`, but if you have modified the config and removed the model field, the builder will fail at startup. Similarly, `agents.planner.model` must be set for the planner.
+    </Warning>
+  </Step>
+
+  <Step title="Detach from the session">
+    To leave the tmux session running in the background without stopping it, use the tmux detach key binding:
+
+    ```
+    Ctrl-b  d
+    ```
+
+    (Press `Ctrl-b`, release, then press `d`.)
+
+    Your shell prompt returns. The session continues running. To re-attach later:
+
+    ```bash
+    taskmaster attach
+    ```
+
+    To check the current lifecycle state of every agent without attaching:
+
+    ```bash
+    taskmaster status
     ```
   </Step>
+
+  <Step title="Plan your first project">
+    Pass a goal to the planner with `taskmaster plan`:
+
+    ```bash
+    taskmaster plan "Build a TODO app"
+    ```
+
+    Here is what happens under the hood:
+
+    1. TaskMaster verifies that `agents.planner.model` is configured, then launches the planner pane running `opencode run --model opencode/nemotron-3.5-lightning-free`.
+    2. The planner produces a `ProjectPlan` (version 1) written to `.taskmaster/inbox/plan.json`.
+    3. TaskMaster validates the plan schema. An invalid plan is rejected in full and recorded as `PLAN_REJECTED` — no partial task inserts occur.
+    4. Valid tasks are inserted into SQLite. Tasks with no unfinished dependencies are marked `READY`.
+    5. TaskMaster immediately picks one `READY` task and runs the builder against it, invoking OpenCode with the configured model.
+    6. The builder run is marked complete once TaskMaster verifies a change in the git working tree.
+
+    Example output after a successful plan and builder run:
+
+    ```
+    Plan accepted: 6 tasks inserted (2 ready)
+    model opencode/nemotron-3.5-lightning-free
+    tmux taskmaster-my-app
+    run  run_01jz...
+    builder task task_01jz... verified
+    ```
+
+    Tester, validator, and documenter remain mocked in the current phase — the pipeline stops after the first builder task completes.
+  </Step>
+
 </Steps>
-
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>

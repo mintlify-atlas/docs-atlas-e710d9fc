@@ -1,0 +1,95 @@
+---
+title: "Configure TaskMaster with config.json"
+sidebarTitle: "Config File"
+description: "Learn where config.json lives, how it is structured, and how to assign AI models to the builder and planner agents."
+---
+
+TaskMaster stores its global configuration in a single JSON file. On first run, `loadConfig` creates the file automatically from built-in defaults and sets strict file-system permissions so credentials are never accidentally exposed. You rarely need to touch this file by hand, but understanding its structure lets you swap models or runtimes without digging through source code.
+
+## Location and permissions
+
+The config file is always located at:
+
+```
+~/.taskmaster/config.json
+```
+
+Set the `TASKMASTER_HOME` environment variable to move the entire state directory — including the config file — to a custom path. The file is created with mode `0600` (owner read/write only).
+
+## Default configuration
+
+When TaskMaster creates the file for the first time it writes the following defaults:
+
+```json
+{
+  "version": 1,
+  "enabledRuntimes": ["opencode"],
+  "agents": {
+    "builder": {
+      "runtime": "opencode",
+      "model": "opencode/nemotron-3.5-lightning-free"
+    },
+    "planner": {
+      "runtime": "opencode",
+      "model": "opencode/nemotron-3.5-lightning-free"
+    }
+  }
+}
+```
+
+## Field reference
+
+<ParamField body="version" type="integer" required>
+  Schema version. Always `1`. TaskMaster uses this field to detect and migrate
+  old config files in future releases.
+</ParamField>
+
+<ParamField body="enabledRuntimes" type="string[]" required>
+  Array of runtime identifiers that TaskMaster is permitted to use. The only
+  supported value today is `"opencode"`. An empty array causes builder and
+  planner runs to fail because no runtime is available.
+</ParamField>
+
+<ParamField body="agents.builder.runtime" type="string" required>
+  The runtime used to execute builder tasks. Must be `"opencode"` — the builder
+  pane runs `opencode run --model <agents.builder.model>` inside the tmux
+  session.
+</ParamField>
+
+<ParamField body="agents.builder.model" type="string" required>
+  The OpenCode model string passed verbatim as the `--model` flag when the
+  builder pane starts. Defaults to `"opencode/nemotron-3.5-lightning-free"`.
+  Change this to any model string that OpenCode accepts.
+</ParamField>
+
+<ParamField body="agents.planner.runtime" type="string" required>
+  The runtime used to execute planner tasks. Must be `"opencode"` — the planner
+  pane uses the same OpenCode command as the builder, with
+  `agents.planner.model` passed as `--model`.
+</ParamField>
+
+<ParamField body="agents.planner.model" type="string" required>
+  The OpenCode model string passed verbatim as the `--model` flag when the
+  planner pane starts. Defaults to `"opencode/nemotron-3.5-lightning-free"`.
+</ParamField>
+
+## Auto-creation and backfill
+
+`loadConfig` runs automatically at the start of every `taskmaster run` and `taskmaster plan` invocation. The lifecycle is:
+
+1. **File missing** — TaskMaster writes the full default config and returns it.
+2. **File present, agent missing** — If `agents.builder` or `agents.planner` is absent from the file, TaskMaster backfills the missing assignment with the default value and rewrites the file. It also adds `"opencode"` to `enabledRuntimes` if that entry is absent.
+3. **File present, both agents configured** — The file is read and returned as-is.
+
+<Warning>
+  An empty `model` string (e.g. `"model": ""`) is treated as a configuration
+  error. TaskMaster throws at runtime and will not fall back to OpenCode's
+  last-selected model. Always provide an explicit, non-empty model string for
+  both `agents.builder.model` and `agents.planner.model`.
+</Warning>
+
+<Note>
+  The tester, validator, and documenter agents are not yet configurable through
+  `config.json`. These roles run on the mock agent and will gain their own
+  `agents.*` entries in Phase 5 and later.
+</Note>

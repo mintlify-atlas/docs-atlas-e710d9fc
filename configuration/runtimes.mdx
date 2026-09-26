@@ -1,0 +1,82 @@
+---
+title: "Supported AI runtimes and authentication"
+sidebarTitle: "Runtimes"
+description: "TaskMaster detects four AI runtimes — Cursor, Codex, OpenCode, and Claude — and checks each one for installation and authentication."
+---
+
+TaskMaster can work alongside four AI runtimes that you may already have installed: Cursor, Codex, OpenCode, and Claude. Running `taskmaster doctor` (or plain `taskmaster`) probes every runtime in parallel and prints a status line for each one. OpenCode is the active runtime for the builder and planner agents. The others are detected and reported but are not yet used as execution backends.
+
+## Runtime statuses
+
+Every runtime probe returns one of four `RuntimeStatus` values:
+
+| Status | Meaning |
+|---|---|
+| `INSTALLED_AUTHENTICATED` | Binary found on `PATH` and an auth signal is present |
+| `INSTALLED_UNAUTHENTICATED` | Binary found on `PATH` but no auth signal detected |
+| `NOT_INSTALLED` | Binary not found on `PATH` |
+| `ERROR` | The detection probe itself threw an unexpected error |
+
+In the `taskmaster doctor` output these map to the following symbols:
+
+- **✓** — `INSTALLED_AUTHENTICATED` (runtime is ready to use)
+- **○** — `INSTALLED_UNAUTHENTICATED` (installed but missing credentials)
+- **✗** — `NOT_INSTALLED` or `ERROR`
+
+## Cursor
+
+**Binary names:** `agent` or `cursor-agent`
+
+TaskMaster resolves both `cursor-agent` and `agent` from `PATH`. If only `agent` is found, it runs a short `--version` probe to confirm the binary belongs to Cursor before marking it as installed.
+
+**Authentication detection (any one of the following):**
+
+- Environment variable `CURSOR_API_KEY` is set and non-empty.
+- `~/.cursor/cli-config.json` exists and its `authInfo` object contains a non-empty `email`, a non-empty `displayName`, or a numeric `userId`.
+
+## Codex
+
+**Binary name:** `codex`
+
+**Authentication detection (any one of the following):**
+
+- Environment variable `OPENAI_API_KEY` is set and non-empty.
+- `~/.codex/auth.json` exists and contains a non-empty value for any of the following fields: top-level `OPENAI_API_KEY`, top-level `accessToken`, `tokens.access_token`, or `tokens.refresh_token`.
+
+## OpenCode
+
+**Binary name:** `opencode`
+
+OpenCode is the active runtime for the builder and planner agents. Every `taskmaster run` and `taskmaster plan` invocation calls `opencode run --model <model>` inside the appropriate tmux pane.
+
+**Authentication detection (any one of the following):**
+
+- Environment variable `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY` is set and non-empty.
+- A non-empty credential object is found at `$XDG_DATA_HOME/opencode/auth.json`. When `XDG_DATA_HOME` is not set, the path defaults to `~/.local/share/opencode/auth.json`.
+
+## Claude
+
+**Binary name:** `claude`
+
+**Authentication detection (any one of the following):**
+
+- Environment variable `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set and non-empty.
+- A non-empty credential object is found at `$CLAUDE_CONFIG_DIR/.credentials.json` or `$CLAUDE_CONFIG_DIR/credentials.json`. When `CLAUDE_CONFIG_DIR` is not set, both paths are checked under `~/.claude/`.
+
+## How doctor works
+
+`taskmaster doctor` resolves binary paths, reads credential files, and inspects environment variables. It does **not** send a test prompt to any model — detection is a binary pass/fail check only.
+
+<Note>
+  Doctor does not verify that your API key is valid or that your account has
+  sufficient credits. A runtime shows `INSTALLED_AUTHENTICATED` as soon as a
+  non-empty credential signal is present, regardless of whether that credential
+  works against the upstream API.
+</Note>
+
+<Tip>
+  In CI or other non-interactive environments where credential files are
+  unavailable, set the relevant environment variables directly in your pipeline.
+  For OpenCode, any of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or
+  `OPENROUTER_API_KEY` will satisfy the authentication check.
+</Tip>

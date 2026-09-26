@@ -1,0 +1,68 @@
+---
+title: "taskmaster run — execute a single builder task"
+sidebarTitle: "run"
+description: "taskmaster run --agent builder runs a single OpenCode prompt in the builder tmux pane, records the task in SQLite, and verifies the result via exit code and git diff."
+---
+
+`taskmaster run` hands a single prompt to the builder agent, tracks it as a task in SQLite, and verifies that the run produced a real code change. It is the lowest-level way to drive the builder agent directly — without going through the full planning pipeline — and is useful for one-off tasks, debugging, or scripted workflows.
+
+## Synopsis
+
+```bash
+taskmaster run --agent builder "<prompt>"
+```
+
+## Flags
+
+<ParamField path="--agent" type="string" required>
+  Selects the agent to run. Only `builder` is currently supported. Passing any other value exits immediately with code `2`.
+</ParamField>
+
+<ParamField path="prompt" type="string" required>
+  The instruction given to OpenCode. This is the positional argument that follows the flags. The full string is passed verbatim as the OpenCode prompt.
+</ParamField>
+
+## What happens
+
+1. Loads `agents.builder.model` from `~/.taskmaster/config.json` (default: `opencode/nemotron-3.5-lightning-free`).
+2. Ensures the demo tmux session is running — starts it automatically if it is not.
+3. Creates a new task in SQLite with status `READY`, then claims it for the builder agent.
+4. Runs `opencode run --model <model> <prompt>` in the builder tmux pane using `respawn-pane`.
+5. Waits up to `TASKMASTER_RUN_TIMEOUT_MS` milliseconds (default **180000 ms / 3 minutes**) for the pane to exit.
+6. Verifies the result: the run is considered successful only when **all three** of the following are true:
+   - OpenCode exited with code `0`
+   - `git status --porcelain` shows at least one new change compared to before the run
+   - If the prompt names a specific file, that file exists on disk
+
+## Output
+
+On a successful run:
+
+```
+Builder run <uuid>
+model opencode/nemotron-3.5-lightning-free
+tmux taskmaster-<project>
+verified <filename or "git change">
+```
+
+The `verified` line shows the specific filename when the prompt mentioned a file, or the string `git change` when verification passed on the basis of any git diff.
+
+## Exit codes
+
+| Code | Condition |
+|------|-----------|
+| `0` | Run verified successfully. |
+| `1` | Verification failed (bad exit code, no git change, or file not created), or an unexpected error occurred. |
+| `2` | Invalid usage — `--agent` is missing or is not `builder`, or no prompt was supplied. |
+
+<Warning>
+  Only `--agent builder` is supported in this release. Tester, validator, planner, and documenter agents do not yet have a `run` pathway — they remain as mock agents in the tmux session.
+</Warning>
+
+<Note>
+  Set the `TASKMASTER_RUN_TIMEOUT_MS` environment variable to override the default 3-minute timeout. The value is parsed as an integer number of milliseconds. For long-running tasks such as generating large files or installing dependencies, increase this value accordingly:
+
+  ```bash
+  TASKMASTER_RUN_TIMEOUT_MS=600000 taskmaster run --agent builder "Implement the full test suite"
+  ```
+</Note>

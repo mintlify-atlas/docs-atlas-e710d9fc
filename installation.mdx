@@ -1,0 +1,204 @@
+---
+title: "Install TaskMaster on your development machine"
+sidebarTitle: "Installation"
+description: "Build TaskMaster from source on Node.js 22.13+, satisfy the tmux and AI runtime dependencies, and verify the install with taskmaster doctor."
+---
+
+TaskMaster is built from source. There is no npm registry package — the repository is private and `npm publish` is not part of the release process. Installation takes about two minutes: clone, install the handful of dev dependencies, compile TypeScript, and optionally link the binary onto your PATH.
+
+<Note>
+  Because TaskMaster is marked `"private": true` in `package.json`, it will never be published to the npm registry. You must build it from source following the steps below.
+</Note>
+
+## System requirements
+
+Before building, make sure the following are present on your machine.
+
+### Node.js ≥ 22.13
+
+TaskMaster uses `node:sqlite`, a built-in SQLite module introduced in Node.js 22.13. Earlier versions of Node — including those that ship with many Linux distributions by default — will not work.
+
+```bash
+node --version
+# must print v22.13.0 or higher
+```
+
+If you need to upgrade, use a version manager such as [nvm](https://github.com/nvm-sh/nvm), [fnm](https://github.com/Schniz/fnm), or [Volta](https://volta.sh/):
+
+```bash
+# example using nvm
+nvm install 22
+nvm use 22
+```
+
+### tmux
+
+TaskMaster creates and manages tmux sessions to display the five agent panes. Any recent stable release of tmux works. Install it through your system package manager if it is not already present:
+
+```bash
+# macOS
+brew install tmux
+
+# Debian / Ubuntu
+sudo apt install tmux
+
+# Arch
+sudo pacman -S tmux
+```
+
+### git
+
+Project detection is based on the git root of the directory you run `taskmaster` from. git must be on your PATH.
+
+```bash
+git --version
+```
+
+### At least one AI runtime
+
+TaskMaster probes for four AI runtimes at startup. Currently, the builder and planner panes only execute tasks through **OpenCode** — but `taskmaster doctor` reports the status of all four so you can see what is available:
+
+| Runtime | Binary probed | Authentication signal |
+|---|---|---|
+| **OpenCode** | `opencode` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `~/.local/share/opencode/auth.json` |
+| **Cursor** | `agent` / `cursor-agent` | `CURSOR_API_KEY` or `~/.cursor/cli-config.json` |
+| **Codex** | `codex` | `OPENAI_API_KEY` or `~/.codex/auth.json` |
+| **Claude Code** | `claude` | `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, or `~/.claude/.credentials.json` |
+
+For live planner and builder tasks you must have OpenCode installed and authenticated. Follow the [OpenCode documentation](https://opencode.ai) to complete the initial login before running TaskMaster.
+
+## Build from source
+
+<Steps>
+
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/adi3120/TaskMaster.git
+    cd TaskMaster
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    TaskMaster has no production dependencies. The three dev dependencies are TypeScript, the Node type definitions, and the Vitest test runner:
+
+    ```bash
+    npm install
+    ```
+
+    After this step, `node_modules` contains only build and test tooling — nothing that needs to be bundled or shipped.
+  </Step>
+
+  <Step title="Compile TypeScript">
+    ```bash
+    npm run build
+    ```
+
+    This runs `tsc` using the project's `tsconfig.json`. Compiled JavaScript is emitted to `dist/`. The entry point for the CLI is `dist/cli.js`.
+  </Step>
+
+  <Step title="Link the binary (optional but recommended)">
+    `npm link` registers the `taskmaster` bin entry from `package.json` as a global command:
+
+    ```bash
+    npm link
+    ```
+
+    Verify it is on your PATH:
+
+    ```bash
+    taskmaster --version
+    # or
+    taskmaster help
+    ```
+
+    To unlink later:
+
+    ```bash
+    npm unlink -g taskmaster
+    ```
+  </Step>
+
+</Steps>
+
+## Running without linking
+
+If you prefer not to install the binary globally, you can invoke TaskMaster directly from the repository using the `taskmaster` npm script. This script compiles TypeScript and immediately runs the compiled output, so it always reflects your latest source changes:
+
+```bash
+npm run taskmaster -- doctor
+npm run taskmaster -- demo
+npm run taskmaster -- plan "Build a TODO app"
+```
+
+Pass CLI arguments after the `--` separator so npm does not interpret them as its own flags.
+
+## State directory
+
+On first run, TaskMaster automatically creates its state directory at `~/.taskmaster` with the following layout and permissions:
+
+```
+~/.taskmaster/          # mode 0700
+├── config.json         # mode 0600 — enabled runtimes and agent model assignments
+├── secrets/            # mode 0700 — credential files, each mode 0600
+└── state.sqlite        # mode 0600 — projects, tasks, runs, sessions, events
+```
+
+The directory is never created inside your project repository. `config.json` holds runtime and model configuration only — API keys are never stored there.
+
+To use a custom location instead of `~/.taskmaster`, set the `TASKMASTER_HOME` environment variable before running any `taskmaster` command:
+
+```bash
+export TASKMASTER_HOME=/opt/taskmaster-state
+taskmaster doctor
+```
+
+The default `config.json` written on first run looks like this:
+
+```json
+{
+  "version": 1,
+  "enabledRuntimes": ["opencode"],
+  "agents": {
+    "builder": {
+      "runtime": "opencode",
+      "model": "opencode/nemotron-3.5-lightning-free"
+    },
+    "planner": {
+      "runtime": "opencode",
+      "model": "opencode/nemotron-3.5-lightning-free"
+    }
+  }
+}
+```
+
+Edit this file to change the model used by the builder or planner. The `model` field is required — TaskMaster will refuse to start a builder or planner run if the field is empty or missing.
+
+## Verify the installation
+
+Run `taskmaster doctor` to confirm that every required dependency is found and that the state directory initialised correctly:
+
+```bash
+taskmaster doctor
+```
+
+A healthy output looks like this:
+
+```
+TaskMaster doctor
+
+Project  my-app (/home/user/projects/my-app)
+State    /home/user/.taskmaster
+
+tmux         ✓
+git          ✓
+Cursor       ○ unavailable
+Codex        ○ unavailable
+OpenCode     ✓ authenticated
+Claude       ○ unavailable
+```
+
+`taskmaster doctor` exits with code `0` when tmux and git are both present, and `1` otherwise. You can use this in CI or shell scripts to gate on readiness:
+
+```bash
+taskmaster doctor && echo "Ready to run"
+```
