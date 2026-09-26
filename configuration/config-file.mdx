@@ -1,7 +1,7 @@
 ---
-title: "Configure TaskMaster with config.json"
+title: "TaskMaster config.json: Fields, Defaults, and Agent Models"
 sidebarTitle: "Config File"
-description: "Learn where config.json lives, how it is structured, and how to assign AI models to the builder and planner agents."
+description: "config.json field reference: default values, model assignment for builder and planner agents, and how loadConfig auto-creates or backfills the file."
 ---
 
 TaskMaster stores its global configuration in a single JSON file. On first run, `loadConfig` creates the file automatically from built-in defaults and sets strict file-system permissions so credentials are never accidentally exposed. You rarely need to touch this file by hand, but understanding its structure lets you swap models or runtimes without digging through source code.
@@ -10,7 +10,7 @@ TaskMaster stores its global configuration in a single JSON file. On first run, 
 
 The config file is always located at:
 
-```
+```text
 ~/.taskmaster/config.json
 ```
 
@@ -77,19 +77,37 @@ When TaskMaster creates the file for the first time it writes the following defa
 
 `loadConfig` runs automatically at the start of every `taskmaster run` and `taskmaster plan` invocation. The lifecycle is:
 
-1. **File missing** — TaskMaster writes the full default config and returns it.
-2. **File present, agent missing** — If `agents.builder` or `agents.planner` is absent from the file, TaskMaster backfills the missing assignment with the default value and rewrites the file. It also adds `"opencode"` to `enabledRuntimes` if that entry is absent.
-3. **File present, both agents configured** — The file is read and returned as-is.
+<Steps>
+  <Step title="File missing">
+    TaskMaster writes the full default config and returns it.
+  </Step>
+  <Step title="File present, agent missing">
+    If `agents.builder` or `agents.planner` is absent from the file, TaskMaster
+    backfills the missing assignment with the default value and rewrites the
+    file. It also adds `"opencode"` to `enabledRuntimes` if that entry is
+    absent.
+  </Step>
+  <Step title="File present, both agents configured">
+    The file is read and returned as-is.
+  </Step>
+</Steps>
 
 <Warning>
-  An empty `model` string (e.g. `"model": ""`) is treated as a configuration
-  error. TaskMaster throws at runtime and will not fall back to OpenCode's
-  last-selected model. Always provide an explicit, non-empty model string for
-  both `agents.builder.model` and `agents.planner.model`.
+  A missing or non-`"opencode"` runtime, or an empty `model` string, is treated
+  as a configuration error. TaskMaster throws the following error and will not
+  fall back to OpenCode's last-selected model:
+
+  ```text
+  Builder OpenCode model is not configured. Set agents.builder.runtime to "opencode" and agents.builder.model. TaskMaster will not use OpenCode's remembered model.
+  ```
+
+  (Replace `Builder`/`builder` with `Planner`/`planner` for the planner role.)
+  Always provide an explicit, non-empty model string and set `runtime` to
+  `"opencode"` for both `agents.builder` and `agents.planner`.
 </Warning>
 
 <Note>
-  The tester, validator, and documenter agents are not yet configurable through
-  `config.json`. These roles run on the mock agent and will gain their own
-  `agents.*` entries in Phase 5 and later.
+  The tester, validator, and documenter agents are not currently configurable
+  through `config.json`. These roles run on the mock agent and do not have
+  `agents.*` entries in the config file.
 </Note>

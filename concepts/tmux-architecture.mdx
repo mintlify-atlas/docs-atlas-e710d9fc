@@ -1,5 +1,5 @@
 ---
-title: "tmux session layout and process ownership"
+title: "TaskMaster tmux layout: sessions, windows, and panes"
 sidebarTitle: "tmux Architecture"
 description: "TaskMaster creates a named tmux session with two windows and six panes. SQLite is the source of truth; tmux is the surface a person watches."
 ---
@@ -29,7 +29,7 @@ Six panes on a single laptop screen are too small to be useful. TaskMaster there
 
 ### `agents` window — 2×2 grid
 
-```
+```text
 ┌─────────────────────┬─────────────────────┐
 │      planner        │       builder       │
 │                     │                     │
@@ -43,7 +43,7 @@ The layout is built by `createDemoLayout` in `src/tmux.ts`: the planner pane is 
 
 ### `support` window — side-by-side
 
-```
+```text
 ┌─────────────────────┬─────────────────────┐
 │     documenter      │   taskmaster-log    │
 │                     │  (event log tail)   │
@@ -129,7 +129,7 @@ This calls `respawnPane` with the stored command, sets the lifecycle to `RESTART
 
 Detach from the session at any time using the standard tmux prefix:
 
-```
+```text
 Ctrl-b d
 ```
 

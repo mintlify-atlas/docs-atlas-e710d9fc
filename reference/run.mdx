@@ -1,7 +1,7 @@
 ---
-title: "taskmaster run — execute a single builder task"
+title: "taskmaster run — Execute a Single Builder Agent Task"
 sidebarTitle: "run"
-description: "taskmaster run --agent builder runs a single OpenCode prompt in the builder tmux pane, records the task in SQLite, and verifies the result via exit code and git diff."
+description: "taskmaster run --agent builder sends a prompt to OpenCode in the builder pane, records the task in SQLite, and verifies the result via git diff."
 ---
 
 `taskmaster run` hands a single prompt to the builder agent, tracks it as a task in SQLite, and verifies that the run produced a real code change. It is the lowest-level way to drive the builder agent directly — without going through the full planning pipeline — and is useful for one-off tasks, debugging, or scripted workflows.

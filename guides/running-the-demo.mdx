@@ -1,15 +1,15 @@
 ---
-title: "Run the TaskMaster demo with mock agents"
+title: "Run the TaskMaster demo session with five mock agents"
 sidebarTitle: "Run the Demo"
-description: "Open a tmux demo session with TaskMaster's five-agent layout, manage individual agent panes, and monitor live agent lifecycle status with taskmaster status."
+description: "Start a named tmux session with all five agent panes, manage agent lifecycles, and monitor status without running a real workload."
 ---
 
-The `taskmaster demo` command opens a named tmux session and launches all five agents — planner, builder, tester, validator, and documenter. In the demo session the planner and builder panes are wired to OpenCode, while the tester, validator, and documenter panes run lightweight mock agents so you can observe the full layout without a real workload. The demo is the prerequisite for every other TaskMaster command.
+The `taskmaster demo` command opens a named tmux session and launches all five agents — planner, builder, tester, validator, and documenter — as lightweight mock processes. All five panes run the same mock agent script, so you can observe the full layout and lifecycle transitions without connecting to OpenCode or any other runtime. Use `taskmaster run` or `taskmaster plan` to replace the builder or planner pane with a real OpenCode process once the demo session is up.
 
 ## Prerequisites
 
 - **tmux** installed and available on your `PATH` (verify with `taskmaster doctor`)
-- The project directory must be a git repository, or any directory works for the demo layout itself
+- A project directory to launch the session from (a git repository is not required for the demo layout itself)
 
 ## Starting the demo
 
@@ -62,7 +62,7 @@ The `taskmaster demo` command opens a named tmux session and launches all five a
 
     ```
 
-    The lifecycle label for each agent reflects the last tmux liveness probe: `starting`, `running`, `exited`, `crashed`, or `restarting`.
+    Each role name is padded to 14 characters, followed immediately by its lifecycle label. The lifecycle label for each agent reflects the last tmux liveness probe: `starting`, `running`, `exited`, `crashed`, or `restarting`.
   </Step>
 
   <Step title="Re-attach to the session">
@@ -121,7 +121,7 @@ Kills the tmux session and marks all agent executions as `EXITED` in SQLite.
 ## Session reuse and recreation
 
 <Note>
-  Running `taskmaster demo` a second time reuses the existing session if all five agent panes and the log pane are still alive. If any pane is missing, TaskMaster kills the existing session and recreates it from scratch. You will never end up with a `taskmaster-my-project-1` duplicate.
+  Running `taskmaster demo` a second time reuses the existing session if all five agent panes **and** the log pane are still present. If any pane is missing, TaskMaster kills the existing session and recreates it from scratch. You will never end up with a `taskmaster-my-project-1` duplicate.
 </Note>
 
 ## Running without auto-attach

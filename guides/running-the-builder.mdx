@@ -1,7 +1,7 @@
 ---
-title: "Run the builder agent with OpenCode"
+title: "Run the builder with OpenCode and verify git changes"
 sidebarTitle: "Run the Builder"
-description: "Dispatch a single builder task via OpenCode in its tmux pane, then verify the result by checking git status and the presence of any requested file."
+description: "Send a prompt to the builder's tmux pane via OpenCode, wait for exit, and verify the result with git status and an optional file check."
 ---
 
 `taskmaster run --agent builder "<prompt>"` dispatches a single prompt to the builder agent running OpenCode in its tmux pane. TaskMaster creates a task record in SQLite, invokes `opencode run --model <model> <prompt>` inside the builder pane, waits for the process to exit, and then verifies the result by checking git status. If verification passes, the run is marked `DONE` and the command exits cleanly.
@@ -19,7 +19,7 @@ description: "Dispatch a single builder task via OpenCode in its tmux pane, then
 taskmaster run --agent builder "Create FILE.md containing exactly: Hello World"
 ```
 
-Replace the prompt with any instruction you want the builder to execute. If the prompt names a specific file (for example `FILE.md`), TaskMaster also verifies that file exists after the run.
+Replace the prompt with any instruction you want the builder to execute. If the prompt begins with `Create` followed by a `.md` filename (for example `Create FILE.md containing exactly: ...`), TaskMaster also verifies that file exists after the run.
 
 ## What happens internally
 
@@ -31,7 +31,7 @@ Replace the prompt with any instruction you want the builder to execute. If the 
 6. Git status is captured before and after the run. Verification requires:
    - Exit code `0`
    - At least one new line in `git status --porcelain` (a real git change)
-7. If the prompt mentioned a specific filename, TaskMaster also checks that the file exists on disk.
+7. If `fileRequestedByPrompt` detected a `.md` filename in the prompt, TaskMaster also checks that the absolute path to that file exists on disk.
 
 ## Successful output
 
@@ -41,10 +41,10 @@ When verification passes, the command prints:
 Builder run <run-id>
 model opencode/nemotron-3.5-lightning-free
 tmux taskmaster-my-project
-verified FILE.md
+verified /path/to/project/FILE.md
 ```
 
-If no specific file was requested, the last line reads `verified git change`.
+If no specific `.md` file was detected in the prompt, the last line reads `verified git change`.
 
 ## Verification logic
 
@@ -54,7 +54,11 @@ A run is verified when **all** of the following are true:
 | --- | --- |
 | OpenCode exits with code `0` | Always |
 | `git status --porcelain` has at least one new change | Always |
-| The file named in the prompt exists | Only when a filename was detected in the prompt |
+| The `.md` file named in the prompt exists on disk | Only when a filename was detected in the prompt |
+
+<Note>
+  File detection uses the pattern `Create <filename>.md` in the prompt text. Only `.md` filenames are matched by `fileRequestedByPrompt`. Other file types are not checked for existence even if mentioned in the prompt.
+</Note>
 
 If verification fails, TaskMaster throws an error, marks the task `FAILED`, and exits with code `1`. Check the builder pane output with `taskmaster attach`.
 

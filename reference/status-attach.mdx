@@ -1,7 +1,7 @@
 ---
-title: "taskmaster status and attach — session monitoring"
+title: "taskmaster status and attach — Live Session Monitor"
 sidebarTitle: "status & attach"
-description: "taskmaster status reconciles live tmux panes against SQLite and prints agent lifecycle states. taskmaster attach reconnects your terminal to the running multi-agent tmux session."
+description: "taskmaster status reconciles live tmux panes with SQLite and prints agent lifecycle states. taskmaster attach reconnects your terminal to the tmux session."
 ---
 
 `taskmaster status` and `taskmaster attach` are your two primary observation tools. Use `status` to get a quick snapshot of every agent's lifecycle without opening a terminal multiplexer, and `attach` to drop back into the tmux session when you want to watch agents work in real time.
@@ -33,10 +33,13 @@ If the tmux session is not running, the last line reads `taskmaster-my-project (
 
 ### Lifecycle values
 
+Lifecycle labels are produced by `lifecycleLabel()`, which lowercases the internal `AgentLifecycle` constant. The possible values are:
+
 | Value | Meaning |
 |-------|---------|
-| `running` | The tmux pane is alive and the process is active. |
+| `created` | The execution record exists but the agent process has not yet been launched. |
 | `starting` | The pane was just created; the process has not yet been confirmed alive. |
+| `running` | The tmux pane is alive and the process is active. |
 | `restarting` | A restart was requested; the pane is being respawned. |
 | `exited` | The process ended with a zero exit code or the session was stopped cleanly. |
 | `crashed` | The process ended with a non-zero exit code, or the pane disappeared unexpectedly. |

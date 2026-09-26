@@ -1,10 +1,10 @@
 ---
-title: "Plan a project and run the first builder task"
+title: "Plan a project: validate, persist tasks, and run the builder"
 sidebarTitle: "Plan a Project"
-description: "Invoke the planner agent with a goal, validate the returned ProjectPlan JSON, persist the task DAG in SQLite, and execute the first READY builder task automatically."
+description: "Run the planner in its tmux pane, validate the ProjectPlan JSON it writes, persist the task graph in SQLite, and run the first builder task."
 ---
 
-`taskmaster plan "<goal>"` is the high-level entry point for starting a new project or feature. It invokes the planner agent with your goal, validates the JSON plan the planner writes, persists the full task DAG into SQLite, then immediately claims and runs the first `READY` builder task. When the command returns, you have a verified git change and a structured backlog of remaining tasks waiting to be worked.
+`taskmaster plan "<goal>"` is the high-level entry point for starting a new project or feature. It invokes the planner agent with your goal, validates the JSON plan the planner writes to `.taskmaster/inbox/plan.json`, persists the full task DAG into SQLite, then immediately claims and runs the first `READY` builder task. When the command returns, you have a verified git change and a structured backlog of remaining tasks waiting to be worked.
 
 ## Prerequisites
 
@@ -31,7 +31,7 @@ taskmaster plan "Build Tic Tac Toe"
   </Step>
 
   <Step title="Read .taskmaster/inbox/plan.json">
-    After OpenCode exits, TaskMaster reads `.taskmaster/inbox/plan.json` from the repository root. If the file is empty or missing, the plan is immediately rejected.
+    After OpenCode exits, TaskMaster reads `.taskmaster/inbox/plan.json` from the repository root. If the file is empty or missing, the plan is immediately rejected with the error _"Planner did not write .taskmaster/inbox/plan.json"_.
   </Step>
 
   <Step title="Validate the ProjectPlan">
@@ -49,7 +49,7 @@ taskmaster plan "Build Tic Tac Toe"
   </Step>
 
   <Step title="Persist the task DAG">
-    On success, tasks are inserted into SQLite. Tasks with no unmet dependencies are given status `READY`; tasks that depend on others start as `PENDING`. As `READY` tasks complete, `promoteReady` advances the next eligible tasks.
+    On success, tasks are inserted into SQLite. Tasks with no unmet dependencies are given status `READY`; tasks that depend on others start as `PENDING`. As `READY` tasks complete, `promoteReady` advances the next eligible tasks. If the plan includes an `architecture` section, its content is also written to `.taskmaster/memory/ARCHITECTURE.md`.
   </Step>
 
   <Step title="Run the first READY builder task">
@@ -60,13 +60,30 @@ taskmaster plan "Build Tic Tac Toe"
 ## Example output
 
 ```
-Project: Build Tic Tac Toe
-Tasks: 6 (2 READY, 4 PENDING)
+TaskMaster Plan
+
+Goal:
+Build Tic Tac Toe
+
+Tasks:
+
+1. Create index.html
+   Owner: builder
+   Dependencies: none
+
+2. Add game logic
+   Owner: builder
+   Depends on: 1
+
+Plan valid: yes
+
 model opencode/nemotron-3.5-lightning-free
 tmux taskmaster-my-project
 run <run-id>
 builder task <task-id> verified
 ```
+
+The summary is printed first (produced by `formatPlanSummary`), followed by the model, tmux session name, run ID, and — when a builder task was run and verified — the task ID.
 
 ## ProjectPlan JSON structure
 
@@ -108,7 +125,7 @@ This is useful when you want to inspect the task list before any code is written
 ## Planner constraints
 
 <Note>
-  The planner may **only** write `.taskmaster/inbox/plan.json`. If it modifies any product source file during its run, TaskMaster detects the change via `git status --porcelain` and rejects the plan. This is an intentional guard — re-run `taskmaster plan` if this happens.
+  The planner may **only** write `.taskmaster/inbox/plan.json`. If it modifies any product source file during its run, TaskMaster detects the change via `git status --porcelain` and rejects the plan. This is an intentional guard — re-run `taskmaster plan` if this happens. The plan file from the previous attempt is deleted before each new run, so there is no stale state to clean up manually.
 </Note>
 
 ## Planner skill rules

@@ -1,7 +1,7 @@
 ---
-title: "ProjectPlan JSON schema reference"
+title: "ProjectPlan JSON Schema: Fields and Validation Rules"
 sidebarTitle: "Plan Schema"
-description: "Complete reference for the version-1 ProjectPlan JSON structure the planner must produce and that TaskMaster validates before inserting any tasks."
+description: "Reference for the version-1 ProjectPlan JSON structure the planner produces, every field, and all validation rules enforced before task insertion."
 ---
 
 The planner agent writes its output to `.taskmaster/inbox/plan.json` inside the project's git root. TaskMaster reads that file after the OpenCode process exits, runs it through `validatePlan`, and only inserts the task DAG into SQLite once every validation check passes. If the file is missing, malformed, or contains any error, the entire plan is rejected.

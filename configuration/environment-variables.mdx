@@ -1,7 +1,7 @@
 ---
-title: "TaskMaster environment variable reference"
+title: "TaskMaster Environment Variables: Complete Reference"
 sidebarTitle: "Environment Variables"
-description: "Complete reference for all environment variables that control TaskMaster's state directory, timeouts, agent behaviour, and runtime authentication."
+description: "All environment variables controlling TaskMaster state, run timeouts, plan-only mode, tmux attach behaviour, and runtime auth — with defaults."
 ---
 
 TaskMaster reads a small set of environment variables at startup to control where state is stored, how long agent runs are allowed to take, and whether certain automatic behaviours should be suppressed. Additional variables are read by the runtime-detection layer to determine whether each AI runtime is authenticated. None of these variables need to be set for a basic local workflow — the defaults work out of the box.
@@ -39,10 +39,10 @@ TaskMaster reads a small set of environment variables at startup to control wher
 </ParamField>
 
 <ParamField query="TASKMASTER_NO_ATTACH" type="string">
-  When set to any non-empty value, `taskmaster demo` will not automatically
-  attach to the tmux session after starting it. Useful for scripts and CI
-  pipelines where there is no terminal to attach to. When unset and stdout is a
-  TTY, TaskMaster attaches automatically.
+  When set to any truthy value, `taskmaster demo` will not automatically attach
+  to the tmux session after starting it. Useful for scripts and CI pipelines
+  where there is no terminal to attach to. When unset and stdout is a TTY,
+  TaskMaster attaches automatically.
 </ParamField>
 
 ## Runtime authentication variables

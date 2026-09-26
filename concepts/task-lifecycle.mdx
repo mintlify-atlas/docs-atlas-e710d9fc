@@ -1,5 +1,5 @@
 ---
-title: "Task lifecycle and ownership in TaskMaster"
+title: "TaskMaster task lifecycle: statuses and atomic ownership"
 sidebarTitle: "Task Lifecycle"
 description: "Tasks move through nine statuses from PENDING to DONE, claimed atomically. A failed validation returns a task to REWORK for the builder to address."
 ---
@@ -22,7 +22,7 @@ export const TASK_STATUSES = [
 
 ## Status flow
 
-```
+```text
          ┌──────────────────────────────────────┐
          │                                      │
 PENDING ──► READY ──► RUNNING ──► TESTING ──► VALIDATING ──► DONE

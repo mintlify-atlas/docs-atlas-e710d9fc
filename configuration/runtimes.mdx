@@ -1,7 +1,7 @@
 ---
-title: "Supported AI runtimes and authentication"
+title: "AI Runtimes: Installation and Authentication Detection"
 sidebarTitle: "Runtimes"
-description: "TaskMaster detects four AI runtimes — Cursor, Codex, OpenCode, and Claude — and checks each one for installation and authentication."
+description: "How TaskMaster detects Cursor, Codex, OpenCode, and Claude — binary names, credential file paths, and env vars the doctor command checks."
 ---
 
 TaskMaster can work alongside four AI runtimes that you may already have installed: Cursor, Codex, OpenCode, and Claude. Running `taskmaster doctor` (or plain `taskmaster`) probes every runtime in parallel and prints a status line for each one. OpenCode is the active runtime for the builder and planner agents. The others are detected and reported but are not yet used as execution backends.

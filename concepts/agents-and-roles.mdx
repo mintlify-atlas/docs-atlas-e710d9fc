@@ -1,5 +1,5 @@
 ---
-title: "Agents and roles in the TaskMaster team"
+title: "TaskMaster agents: five fixed roles and their lifecycle"
 sidebarTitle: "Agents & Roles"
 description: "TaskMaster's five fixed roles (planner, builder, tester, validator, documenter) each have defined responsibilities, a runtime model, and a lifecycle state."
 ---
@@ -76,7 +76,7 @@ Each row stores the agent's `role`, an optional `runtime_id`, `provider_id`, and
 
 When `taskmaster demo` starts, each agent is given a tmux pane and its process state is tracked in the `agent_executions` table through a separate lifecycle that is independent of task status:
 
-```
+```text
 CREATED → STARTING → RUNNING → EXITED
                    ↓
                 CRASHED

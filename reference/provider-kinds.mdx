@@ -1,7 +1,7 @@
 ---
-title: "Provider kinds and the provider registry"
+title: "Provider Kinds, ProviderRecord Schema, and Secrets Model"
 sidebarTitle: "Provider Kinds"
-description: "The six provider kinds stored in the SQLite providers table, the ProviderRecord schema, and how API keys are referenced without being stored in the project repo."
+description: "The six provider kinds in the SQLite providers table, ProviderRecord fields, and how API keys are stored by reference rather than by value."
 ---
 
 TaskMaster stores provider configurations in the `providers` SQLite table.
@@ -79,8 +79,8 @@ Passing any string outside this set to `addProvider` raises
 ## Secrets model
 
 API keys are stored by reference, not by value. The `apiKeyRef` field holds a
-filename stem. At runtime, `SecretStore` (implemented as `FileSecretStore` in
-Phase 1) resolves the full path:
+filename stem. At runtime, `SecretStore` (implemented by `FileSecretStore` in
+`src/providers/secrets.ts`) resolves the full path:
 
 ```
 ~/.taskmaster/secrets/<apiKeyRef>
@@ -116,16 +116,8 @@ const one = getProvider(db, record.id);
 ```
 
 <Note>
-  No `provider add` CLI command exists yet — that feature is planned for
-  Phase 9. The `providers` table and the `addProvider` / `listProviders`
-  functions are available in the database layer and are ready for use by
-  future CLI commands and agent configuration flows.
+  No `provider add` CLI command is currently implemented. The `providers`
+  table and the `addProvider` / `listProviders` / `getProvider` functions
+  are available in the database layer and are consumed by future CLI commands
+  and agent configuration flows once they are added.
 </Note>
-
-<Info>
-  Phase 9 will introduce `taskmaster provider add openrouter` with an
-  interactive key prompt. The command will write the key to
-  `~/.taskmaster/secrets/openrouter` (mode `0600`) and insert a
-  `ProviderRecord` row with `apiKeyRef: "openrouter"`. No key value will
-  appear in command history or SQLite.
-</Info>

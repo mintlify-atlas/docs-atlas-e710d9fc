@@ -1,5 +1,5 @@
 ---
-title: "Install TaskMaster on your development machine"
+title: "Building and Installing the TaskMaster CLI from Source"
 sidebarTitle: "Installation"
 description: "Build TaskMaster from source on Node.js 22.13+, satisfy the tmux and AI runtime dependencies, and verify the install with taskmaster doctor."
 ---
@@ -106,8 +106,6 @@ For live planner and builder tasks you must have OpenCode installed and authenti
     Verify it is on your PATH:
 
     ```bash
-    taskmaster --version
-    # or
     taskmaster help
     ```
 
@@ -136,7 +134,7 @@ Pass CLI arguments after the `--` separator so npm does not interpret them as it
 
 On first run, TaskMaster automatically creates its state directory at `~/.taskmaster` with the following layout and permissions:
 
-```
+```text
 ~/.taskmaster/          # mode 0700
 ├── config.json         # mode 0600 — enabled runtimes and agent model assignments
 ├── secrets/            # mode 0700 — credential files, each mode 0600
@@ -183,7 +181,7 @@ taskmaster doctor
 
 A healthy output looks like this:
 
-```
+```text
 TaskMaster doctor
 
 Project  my-app (/home/user/projects/my-app)

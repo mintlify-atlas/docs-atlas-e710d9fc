@@ -1,7 +1,7 @@
 ---
-title: "TaskMaster: tmux-first AI coding orchestrator"
+title: "TaskMaster: tmux-Based Five-Agent Coding Orchestrator"
 sidebarTitle: "Introduction"
-description: "TaskMaster is a local CLI orchestrator that coordinates a fixed five-agent AI coding team inside tmux panes, using SQLite for durable state and OpenCode as the AI runtime."
+description: "TaskMaster runs a fixed five-agent AI coding team inside tmux, backed by SQLite and append-only events, with OpenCode powering planner and builder panes."
 ---
 
 TaskMaster is a command-line orchestrator that runs a fixed five-agent AI coding team directly on your development machine. Instead of delegating to a cloud service or spinning up dynamic worker pools, TaskMaster keeps every agent visible in a tmux session, every task recorded in a local SQLite database, and every decision traceable in an append-only event log. It is designed for developers who want AI-assisted coding workflows that stay local, auditable, and under version control.
@@ -20,7 +20,7 @@ TaskMaster's team is fixed — there is no dynamic hiring, no company tree, and 
 
 The pipeline flows from user goal through the planner's task DAG, into the builder, through testing and validation, and finally to the documenter. When the validator issues a REWORK verdict, the task returns to the builder — the loop is bounded by a retry limit so it always terminates.
 
-```
+```text
 user → planner → builder → tester → validator
                  ↑            fail / rework
                  └────────────┘

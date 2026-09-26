@@ -1,7 +1,7 @@
 ---
 title: "taskmaster demo — launch the multi-agent tmux session"
 sidebarTitle: "demo"
-description: "taskmaster demo starts, stops, restarts, and crashes agents in the multi-agent tmux session. Covers all subcommands: start, status, stop, restart <role>, and crash <role>."
+description: "taskmaster demo starts the multi-agent tmux session and manages individual agents via the status, stop, restart, and crash subcommands."
 ---
 
 `taskmaster demo` manages the tmux session that hosts the five-agent TaskMaster team. The bare `taskmaster demo` command opens (or reuses) the session and optionally auto-attaches your terminal. Subcommands let you inspect agent states, cleanly shut down the session, respawn individual agents, or forcibly kill a process to test crash recovery.
@@ -70,9 +70,9 @@ taskmaster demo restart documenter
 
 Respawns the named agent's tmux pane using the command that was stored when the session was originally created. TaskMaster:
 
-1. Increments `restart_count` on the execution record.
+1. Increments `restartCount` on the execution record.
 2. Sets the agent's lifecycle to `RESTARTING`.
-3. Sends a `AGENT_RESTARTED` event to the event log.
+3. Appends an `AGENT_RESTARTED` event to the event log.
 4. Calls `respawn-pane` on the existing pane, then restores the pane title to the role name.
 
 The updated status table is printed after the restart.

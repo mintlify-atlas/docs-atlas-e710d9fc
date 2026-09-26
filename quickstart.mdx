@@ -1,7 +1,7 @@
 ---
-title: "Get started with TaskMaster"
+title: "TaskMaster Quickstart: Install, Demo, and Plan Tasks"
 sidebarTitle: "Quickstart"
-description: "Install TaskMaster from source, verify your environment with doctor, launch the five-agent tmux demo, and run your first AI-powered plan — all in under ten minutes."
+description: "Clone TaskMaster, build from source, run taskmaster doctor to verify dependencies, launch the five-agent tmux demo, and plan your first AI coding project."
 ---
 
 This guide walks you through everything you need to get TaskMaster running: cloning and building from source, verifying your environment, launching the five-agent tmux demo session, and using `taskmaster plan` to hand a goal to the planner and watch the first builder task execute.
@@ -79,7 +79,7 @@ This guide walks you through everything you need to get TaskMaster running: clon
 
     Example output from a machine where OpenCode is installed and authenticated, tmux and git are present, but Cursor and Codex are not installed:
 
-    ```
+    ```text
     TaskMaster doctor
 
     Project  my-app (/home/user/projects/my-app)
@@ -126,7 +126,7 @@ This guide walks you through everything you need to get TaskMaster running: clon
   <Step title="Detach from the session">
     To leave the tmux session running in the background without stopping it, use the tmux detach key binding:
 
-    ```
+    ```text
     Ctrl-b  d
     ```
 
@@ -163,11 +163,26 @@ This guide walks you through everything you need to get TaskMaster running: clon
 
     Example output after a successful plan and builder run:
 
-    ```
-    Plan accepted: 6 tasks inserted (2 ready)
+    ```text
+    TaskMaster Plan
+
+    Goal:
+    Build a TODO app
+
+    Tasks:
+
+    1. Create project structure
+       Owner: builder
+       Dependencies: none
+
+    2. Implement task model
+       Owner: builder
+       Depends on: 1
+
+    Plan valid: yes
     model opencode/nemotron-3.5-lightning-free
     tmux taskmaster-my-app
-    run  run_01jz...
+    run run_01jz...
     builder task task_01jz... verified
     ```
 

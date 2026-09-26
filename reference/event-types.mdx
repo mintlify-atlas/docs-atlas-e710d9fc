@@ -1,7 +1,7 @@
 ---
-title: "Event types in the TaskMaster event log"
+title: "TaskMaster Event Types: Log Schema and All Event Strings"
 sidebarTitle: "Event Types"
-description: "The append-only event log, the TaskEvent interface fields, and every known event type string emitted by the planner, builder, and demo subsystems."
+description: "The append-only SQLite event log, TaskEvent interface fields, and every event type string emitted by the planner, builder, and demo subsystems."
 ---
 
 TaskMaster uses an append-only `events` table in SQLite for cross-agent
@@ -84,13 +84,13 @@ grouped by the subsystem that produces it.
 | Event Type | Producer | Description |
 |---|---|---|
 | `TASK_CREATED` | builder | Emitted when `runBuilder` creates an ad-hoc task from a direct prompt. |
-| `TASK_STARTED` | builder | Agent began executing the task inside the builder pane. `payload` includes `model` and `runtime`. |
+| `TASK_STARTED` | builder | Agent began executing the task inside the builder pane. In the ad-hoc `runBuilder` path the `payload` includes `model` and `runtime`; in the ready-task path no payload is attached. |
 | `RUN_STARTED` | builder | A builder run record was created. `payload` includes `model`. |
 | `RUNTIME_STARTED` | builder | OpenCode was launched inside the builder pane. `payload` includes `model` and `runtime: "opencode"`. |
 | `RUN_COMPLETED` | builder | The builder run verified the change successfully. |
 | `RUN_FAILED` | builder | The builder run did not produce a verified git change. |
-| `TASK_COMPLETED` | builder | Task exit-code 0 and git change confirmed. `payload` includes `model`, `exitCode`, `sessionKey`, and `createdFile`. |
-| `TASK_FAILED` | builder | Task failed verification (non-zero exit or no git change). Same `payload` shape as `TASK_COMPLETED`. |
+| `TASK_COMPLETED` | builder | Task exit-code 0 and git change confirmed. In the ad-hoc `runBuilder` path the `payload` includes `model`, `exitCode`, `sessionKey`, and `createdFile`; in the ready-task path no payload is attached. |
+| `TASK_FAILED` | builder | Task failed verification (non-zero exit or no git change). Same payload behaviour as `TASK_COMPLETED`. |
 
 ### Demo / session events
 

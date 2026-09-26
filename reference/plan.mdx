@@ -1,7 +1,7 @@
 ---
 title: "taskmaster plan — generate and execute a project plan"
 sidebarTitle: "plan"
-description: "taskmaster plan runs the planner agent with OpenCode, validates the resulting ProjectPlan JSON, inserts the task DAG into SQLite, and immediately executes the first READY builder task."
+description: "taskmaster plan runs the planner with OpenCode, validates the ProjectPlan JSON, inserts tasks into SQLite, and runs the first READY builder task."
 ---
 
 `taskmaster plan` is the high-level entry point for starting a new project or feature. It invokes the planner agent, which uses OpenCode to generate a structured `ProjectPlan` from your goal description. The plan is validated for schema correctness, dependency cycles, and containment — then inserted into SQLite as a task DAG. Unless you opt out, the first READY builder task is executed immediately.
@@ -30,9 +30,25 @@ taskmaster plan "<goal>"
 
 ## Output
 
+The planner prints a structured summary followed by run metadata. For example:
+
 ```
-Project: <projectSummary>
-Tasks: <N> (<M> READY)
+TaskMaster Plan
+
+Goal:
+Build Tic Tac Toe
+
+Tasks:
+
+1. Create game board module
+   Owner: builder
+   Dependencies: none
+
+2. Implement game logic
+   Owner: builder
+   Depends on: 1
+
+Plan valid: yes
 model opencode/nemotron-3.5-lightning-free
 tmux taskmaster-<project>
 run <uuid>

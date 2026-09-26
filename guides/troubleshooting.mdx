@@ -1,7 +1,7 @@
 ---
-title: "Troubleshoot common TaskMaster issues"
+title: "Troubleshoot TaskMaster: runtime, session, and plan errors"
 sidebarTitle: "Troubleshooting"
-description: "Fix common TaskMaster errors including missing runtime, demo session not running, plan rejected, build verification failures, and tmux session problems."
+description: "Diagnose and fix missing runtimes, unconfigured models, stale tmux sessions, failed builder verification, and rejected planner output."
 ---
 
 Most TaskMaster problems fall into a small set of categories: a missing system dependency, an unauthenticated runtime, a misconfigured model, or a stale tmux session. Run `taskmaster doctor` first — it checks tmux, git, and every configured runtime in one pass and tells you exactly what is missing.
@@ -40,7 +40,7 @@ Most TaskMaster problems fall into a small set of categories: a missing system d
   <Accordion title='Builder run fails: "Builder OpenCode model is not configured"'>
     `~/.taskmaster/config.json` is either missing the `agents.builder` section or has an incorrect `runtime` value. The full error is:
 
-    > Builder OpenCode model is not configured. Set agents.builder.runtime to "opencode" and agents.builder.model.
+    > Builder OpenCode model is not configured. Set agents.builder.runtime to "opencode" and agents.builder.model. TaskMaster will not use OpenCode's remembered model.
 
     **Fix:** ensure your config file includes both fields:
 
@@ -61,7 +61,9 @@ Most TaskMaster problems fall into a small set of categories: a missing system d
   </Accordion>
 
   <Accordion title='Builder run fails: "Builder pane is missing"'>
-    The demo session is not running, the builder pane was closed, or the tmux session was killed after the demo started.
+    The demo session is not running, the builder pane was closed, or the tmux session was killed after the demo started. The full error is:
+
+    > Builder pane is missing. Start the demo session again.
 
     **Fix:** start (or restart) the demo session:
 
@@ -73,7 +75,7 @@ Most TaskMaster problems fall into a small set of categories: a missing system d
   </Accordion>
 
   <Accordion title='Builder run fails verification ("did not produce a verified git change")'>
-    The builder exited with code `0` but made no detectable git changes, or a specific file named in the prompt was not created. The full error is:
+    The builder exited with code `0` but made no detectable git changes, or a specific `.md` file named in the prompt was not created. The full error is:
 
     > Builder run failed verification (exit 0). Model \<model\> was passed explicitly.
 
@@ -123,8 +125,12 @@ Most TaskMaster problems fall into a small set of categories: a missing system d
     **Fix:** re-run `taskmaster plan`. The plan file from the previous attempt is deleted before each new run, so there is no stale state to clean up manually.
   </Accordion>
 
-  <Accordion title="TaskClaimError: task is owned by someone in status RUNNING">
-    A task is already claimed and in `RUNNING` status, meaning another agent attempt is still active. Task ownership in TaskMaster is atomic — a second claim attempt for the same task by a different owner is always rejected.
+  <Accordion title='TaskClaimError: "Task <id> is owned by <agent> in status <status>"'>
+    A task is already claimed by another agent or attempt. The full error format is:
+
+    > Task \<taskId\> is owned by \<ownerAgentId\> in status \<status\>
+
+    Task ownership in TaskMaster is atomic — a second claim attempt for the same task by a different owner is always rejected. If no agent owns the task, the message reads `owned by nobody`.
 
     **Fix:** wait for the current run to finish, then check status:
 

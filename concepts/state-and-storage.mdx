@@ -1,5 +1,5 @@
 ---
-title: "State and storage in TaskMaster"
+title: "TaskMaster state and storage: SQLite, config, and secrets"
 sidebarTitle: "State & Storage"
 description: "TaskMaster stores all state in ~/.taskmaster — a SQLite database, a JSON config, and a secrets directory. Nothing ever enters the project repository."
 ---
@@ -8,7 +8,7 @@ TaskMaster keeps all persistent state in a single directory on your machine — 
 
 ## Directory layout
 
-```
+```text
 ~/.taskmaster/          (mode 0700)
 ├── config.json         (mode 0600)
 ├── state.sqlite        (mode 0600)
